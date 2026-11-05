@@ -19,6 +19,7 @@ RUN npm ci --omit=dev
 COPY server ./server
 COPY public ./public
 COPY scripts ./scripts
+COPY supabase ./supabase
 
 # Diretório do banco e backups
 RUN mkdir -p /data
