@@ -1,0 +1,29 @@
+# Render Blueprint — Agenda Expert
+# Em render.com: New + → Blueprint → escolha este repositório do GitHub.
+services:
+  - type: web
+    name: agenda-expert
+    runtime: node
+    region: virginia            # mais próxima do Brasil entre as regiões do Render
+    plan: starter               # necessário para ter disco persistente (o plano free apaga os dados)
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true            # publica sozinho a cada push no GitHub
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /var/data
+      - key: ADMIN_NAME
+        value: Esther Lino
+      - key: ADMIN_EMAIL
+        sync: false             # o Render pede o valor na criação (não fica no GitHub)
+      - key: ADMIN_PASSWORD
+        sync: false
+    disk:
+      name: agenda-data
+      mountPath: /var/data
+      sizeGB: 1
