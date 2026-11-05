@@ -64,8 +64,9 @@ export async function initDb() {
     pg.types.setTypeParser(20, (v) => Number(v)); // bigint (ids, COUNT, SUM) como número
     pg.types.setTypeParser(1700, (v) => Number(v)); // numeric
     const local = /@(localhost|127\.0\.0\.1)[:/]/.test(url) || /sslmode=disable/.test(url);
+    const finalUrl = local ? url : await supabasePooler(pg, url);
     const pool = new pg.Pool({
-      connectionString: url, max: Number(process.env.DB_POOL || 5),
+      connectionString: finalUrl, max: Number(process.env.DB_POOL || 5),
       ssl: local ? false : { rejectUnauthorized: false }, connectionTimeoutMillis: 15000,
     });
     pool.on('error', (e) => console.error('Banco (conexão ociosa):', e.message));
@@ -104,6 +105,41 @@ export async function initDb() {
   }
   await impl.execMany(fs.readFileSync(SCHEMA, 'utf8'));
   return impl.kind;
+}
+
+/**
+ * A conexão "Direct" do Supabase (db.<projeto>.supabase.co) só tem IPv6, e serviços como o Render
+ * só saem por IPv4 (erro ENETUNREACH). Nesse caso, descobre sozinho o "Session pooler" do projeto
+ * (que tem IPv4) testando as regiões do Supabase, e usa ele no lugar.
+ */
+const POOLER_REGIONS = ['us-east-1', 'sa-east-1', 'us-east-2', 'us-west-1', 'us-west-2', 'ca-central-1', 'eu-central-1', 'eu-central-2',
+  'eu-west-1', 'eu-west-2', 'eu-west-3', 'eu-north-1', 'ap-south-1', 'ap-southeast-1', 'ap-southeast-2', 'ap-northeast-1', 'ap-northeast-2'];
+async function supabasePooler(pg, url) {
+  const u = new URL(url);
+  const m = u.hostname.match(/^db\.([a-z0-9]+)\.supabase\.co$/i);
+  if (!m) return url;
+  const ref = m[1];
+  const password = decodeURIComponent(u.password);
+  const database = u.pathname.slice(1) || 'postgres';
+  console.log('ℹ  DATABASE_URL usa a conexão "Direct" do Supabase (só IPv6). Procurando o Session pooler (IPv4)…');
+  const hosts = POOLER_REGIONS.flatMap((r) => [`aws-0-${r}.pooler.supabase.com`, `aws-1-${r}.pooler.supabase.com`]);
+  const probe = async (host) => {
+    const c = new pg.Client({ host, port: 5432, user: `postgres.${ref}`, password, database, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 10000 });
+    try { await c.connect(); await c.end(); return host; } catch (e) {
+      if (/password authentication failed/i.test(e.message)) return host; // região certa (a senha é conferida depois)
+      throw e;
+    }
+  };
+  let host;
+  try { host = await Promise.any(hosts.map(probe)); } catch {
+    throw new Error('não encontrei o Session pooler do projeto. No Supabase, use Connect → Connection string → Session pooler e coloque esse endereço na DATABASE_URL.');
+  }
+  const fixed = new URL(url);
+  fixed.hostname = host;
+  fixed.port = '5432';
+  fixed.username = `postgres.${ref}`;
+  console.log(`✓ Usando o Session pooler ${host}. Dica: coloque este endereço na DATABASE_URL para ligar mais rápido.`);
+  return fixed.toString();
 }
 
 /** Transação: tudo ou nada. Use o "t" recebido para as consultas de dentro. */
