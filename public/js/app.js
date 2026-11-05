@@ -31,7 +31,7 @@ async function boot() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
   try {
     const me = await api.get('/api/me');
-    Object.assign(state, { user: me.user, settings: me.settings, today: me.today });
+    Object.assign(state, { user: me.user, settings: me.settings, today: me.today, storage: me.storage });
     showApp();
   } catch {
     showLogin();
@@ -40,7 +40,7 @@ async function boot() {
 
 function showLogin() {
   renderLogin(root, async (me) => {
-    Object.assign(state, { user: me.user, settings: me.settings, today: me.today });
+    Object.assign(state, { user: me.user, settings: me.settings, today: me.today, storage: me.storage });
     if (!location.hash || location.hash === '#/') location.hash = '#/agenda';
     showApp();
   });
@@ -59,8 +59,11 @@ function showApp() {
 }
 
 let renderSeq = 0;
+let storageCheckedAt = 0;
 async function route() {
   if (!state.user) return;
+  // confere a situação da cópia online de vez em quando
+  if (Date.now() - storageCheckedAt > 60e3) { storageCheckedAt = Date.now(); api.get('/api/storage').then((s) => (state.storage = s)).catch(() => {}); }
   const main = document.getElementById('main');
   if (!main) return;
   const { parts, query } = parseHash();
@@ -80,6 +83,10 @@ async function route() {
     else if (tab === 'mais' && parts[1] === 'whatsapp') await renderWhatsApp(main, ctx);
     else if (tab === 'mais') await renderMore(main, ctx);
     else location.hash = '#/agenda';
+    // aviso permanente quando o servidor não guarda os dados de forma definitiva
+    if (state.storage?.mode === 'temporary' && ctx.isCurrent()) {
+      main.insertAdjacentHTML('afterbegin', `<div class="page"><div class="alert alert--danger" style="margin-top:12px">${I.alert}<div><b>Atenção: os dados não estão sendo guardados de forma permanente.</b><br>Este servidor apaga os arquivos quando reinicia. Conecte o banco de dados Supabase (variável DATABASE_URL — veja o guia DEPLOY.md) antes de cadastrar clientes.</div></div></div>`);
+    }
   } catch (e) {
     if (e?.status === 401) return;
     console.error(e);

@@ -1,151 +1,113 @@
-// Banco de dados relacional (SQLite embutido no Node.js) — RSIS02
-import { DatabaseSync } from 'node:sqlite';
+// Banco de dados Postgres — RSIS02
+// • Produção: Supabase (ou qualquer Postgres) pela variável DATABASE_URL.
+// • Sem DATABASE_URL: Postgres embutido (PGlite) gravado em DATA_DIR/pgdata — para usar no computador e nos testes.
+// A interface imita a anterior: db.prepare(sql).get/all/run(...params), agora assíncrona (use await).
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export const DATA_DIR = process.env.DATA_DIR || path.resolve('data');
-fs.mkdirSync(DATA_DIR, { recursive: true });
-export const DB_FILE = path.join(DATA_DIR, 'agenda-expert.db');
-
-export const db = new DatabaseSync(DB_FILE);
-db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
-
-db.exec(`
-CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY,
-  email TEXT NOT NULL UNIQUE,
-  name TEXT NOT NULL DEFAULT 'Esther Lino',
-  password_hash TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS sessions (
-  token_hash TEXT PRIMARY KEY,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  expires_at TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS settings (
-  key TEXT PRIMARY KEY,
-  value TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS clients (
-  id INTEGER PRIMARY KEY,
-  name TEXT NOT NULL,
-  phone TEXT NOT NULL,
-  phone_digits TEXT NOT NULL,
-  birth_date TEXT,
-  email TEXT,
-  notes TEXT,
-  active INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name);
-CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients(phone_digits);
-CREATE TABLE IF NOT EXISTS anamneses (
-  client_id INTEGER PRIMARY KEY REFERENCES clients(id) ON DELETE CASCADE,
-  data TEXT NOT NULL,
-  consent INTEGER NOT NULL DEFAULT 0,
-  filled_at TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS procedures (
-  id INTEGER PRIMARY KEY,
-  name TEXT NOT NULL,
-  description TEXT,
-  price_cents INTEGER NOT NULL,
-  duration_min INTEGER NOT NULL,
-  active INTEGER NOT NULL DEFAULT 1,
-  sort INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS appointments (
-  id INTEGER PRIMARY KEY,
-  client_id INTEGER NOT NULL REFERENCES clients(id),
-  date TEXT NOT NULL,
-  start_at TEXT NOT NULL,
-  end_at TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'agendada',
-  cancel_reason TEXT,
-  notes TEXT,
-  total_cents INTEGER NOT NULL,
-  duration_min INTEGER NOT NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_appt_date ON appointments(date);
-CREATE INDEX IF NOT EXISTS idx_appt_client ON appointments(client_id);
-CREATE TABLE IF NOT EXISTS appointment_procedures (
-  id INTEGER PRIMARY KEY,
-  appointment_id INTEGER NOT NULL REFERENCES appointments(id) ON DELETE CASCADE,
-  procedure_id INTEGER REFERENCES procedures(id),
-  name TEXT NOT NULL,
-  price_cents INTEGER NOT NULL,
-  duration_min INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_ap_appt ON appointment_procedures(appointment_id);
-CREATE TABLE IF NOT EXISTS blocks (
-  id INTEGER PRIMARY KEY,
-  reason TEXT NOT NULL,
-  start_date TEXT NOT NULL,
-  end_date TEXT NOT NULL,
-  all_day INTEGER NOT NULL DEFAULT 1,
-  start_time TEXT,
-  end_time TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS transactions (
-  id INTEGER PRIMARY KEY,
-  type TEXT NOT NULL CHECK (type IN ('in','out')),
-  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
-  date TEXT NOT NULL,
-  category TEXT NOT NULL,
-  method TEXT,
-  description TEXT,
-  client_id INTEGER REFERENCES clients(id),
-  appointment_id INTEGER REFERENCES appointments(id) ON DELETE SET NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_tx_date ON transactions(date);
-CREATE TABLE IF NOT EXISTS wa_messages (
-  id INTEGER PRIMARY KEY,
-  appointment_id INTEGER NOT NULL UNIQUE REFERENCES appointments(id) ON DELETE CASCADE,
-  phone TEXT NOT NULL,
-  jid TEXT,
-  status TEXT NOT NULL,
-  error TEXT,
-  reply TEXT,
-  reply_text TEXT,
-  sent_at TEXT,
-  replied_at TEXT
-);
-CREATE TABLE IF NOT EXISTS stock_items (
-  id INTEGER PRIMARY KEY,
-  name TEXT NOT NULL,
-  unit TEXT NOT NULL DEFAULT 'un',
-  quantity REAL NOT NULL DEFAULT 0,
-  min_quantity REAL NOT NULL DEFAULT 0,
-  active INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS stock_moves (
-  id INTEGER PRIMARY KEY,
-  item_id INTEGER NOT NULL REFERENCES stock_items(id) ON DELETE CASCADE,
-  type TEXT NOT NULL CHECK (type IN ('in','out')),
-  quantity REAL NOT NULL CHECK (quantity > 0),
-  date TEXT NOT NULL,
-  note TEXT,
-  created_at TEXT NOT NULL
-);
-`);
+const SCHEMA = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'supabase', 'schema.sql');
 
 export const nowIso = () => new Date().toISOString();
+
+// tabelas com coluna id gerada (INSERT devolve o id novo)
+const WITH_ID = /^\s*INSERT\s+INTO\s+(users|clients|procedures|appointments|appointment_procedures|blocks|transactions|wa_messages|stock_items|stock_moves)\b/i;
+const cache = new Map();
+/** Converte a sintaxe usada no app (?) para a do Postgres ($1, $2…) */
+function toPg(sql) {
+  if (cache.has(sql)) return cache.get(sql);
+  let n = 0;
+  let out = sql.replace(/\bIS NOT \?/g, 'IS DISTINCT FROM ?').replace(/\?/g, () => `$${++n}`);
+  if (WITH_ID.test(out) && !/\bRETURNING\b/i.test(out)) out += ' RETURNING id';
+  cache.set(sql, out);
+  return out;
+}
+
+function api(exec) {
+  const prepare = (sql) => {
+    const text = toPg(sql);
+    return {
+      all: async (...p) => (await exec(text, p)).rows,
+      get: async (...p) => (await exec(text, p)).rows[0],
+      run: async (...p) => {
+        const r = await exec(text, p);
+        return { changes: r.rowCount ?? r.affectedRows ?? 0, lastInsertRowid: r.rows?.[0]?.id ?? null, rows: r.rows };
+      },
+    };
+  };
+  return { prepare };
+}
+
+let impl = null;
+export const db = {
+  prepare: (sql) => {
+    if (!impl) throw new Error('Banco ainda não iniciado (initDb).');
+    return impl.api.prepare(sql);
+  },
+  exec: (sql) => impl.execMany(sql),
+  get kind() { return impl?.kind; },
+  close: () => impl?.close(),
+};
+
+/** Abre a conexão e cria as tabelas (se ainda não existirem) */
+export async function initDb() {
+  if (impl) return impl.kind;
+  const url = process.env.DATABASE_URL;
+  if (url) {
+    if (/SENHA_DO_BANCO|SUA-SENHA|\[YOUR-PASSWORD\]|SEU-PROJETO/i.test(url))
+      throw new Error('a DATABASE_URL ainda tem o texto de exemplo no lugar da senha. Troque SENHA_DO_BANCO pela senha do banco do Supabase (Project Settings → Database).');
+    try { new URL(url); } catch {
+      throw new Error('a DATABASE_URL não é um endereço válido. Se a senha do banco tiver símbolos (@ # / ? %), gere outra só com letras e números no Supabase.');
+    }
+    const pg = (await import('pg')).default;
+    pg.types.setTypeParser(20, (v) => Number(v)); // bigint (ids, COUNT, SUM) como número
+    pg.types.setTypeParser(1700, (v) => Number(v)); // numeric
+    const local = /@(localhost|127\.0\.0\.1)[:/]/.test(url) || /sslmode=disable/.test(url);
+    const pool = new pg.Pool({
+      connectionString: url, max: Number(process.env.DB_POOL || 5),
+      ssl: local ? false : { rejectUnauthorized: false }, connectionTimeoutMillis: 15000,
+    });
+    pool.on('error', (e) => console.error('Banco (conexão ociosa):', e.message));
+    impl = {
+      kind: 'postgres',
+      api: api((text, p) => pool.query(text, p)),
+      execMany: (sql) => pool.query(sql),
+      tx: async (fn) => {
+        const c = await pool.connect();
+        try {
+          await c.query('BEGIN');
+          const r = await fn(api((text, p) => c.query(text, p)));
+          await c.query('COMMIT');
+          return r;
+        } catch (e) {
+          await c.query('ROLLBACK').catch(() => {});
+          throw e;
+        } finally {
+          c.release();
+        }
+      },
+      close: () => pool.end(),
+    };
+  } else {
+    const { PGlite } = await import('@electric-sql/pglite');
+    const dir = process.env.PGLITE_MEMORY === '1' ? undefined : path.join(DATA_DIR, 'pgdata');
+    if (dir) fs.mkdirSync(dir, { recursive: true });
+    const pgl = await PGlite.create(dir);
+    impl = {
+      kind: 'local',
+      api: api((text, p) => pgl.query(text, p)),
+      execMany: (sql) => pgl.exec(sql),
+      tx: (fn) => pgl.transaction((t) => fn(api((text, p) => t.query(text, p)))),
+      close: () => pgl.close(),
+    };
+  }
+  await impl.execMany(fs.readFileSync(SCHEMA, 'utf8'));
+  return impl.kind;
+}
+
+/** Transação: tudo ou nada. Use o "t" recebido para as consultas de dentro. */
+export const tx = (fn) => impl.tx(fn);
 
 // Catálogo inicial — Anexo A (durações são estimativas a confirmar)
 const CATALOG = [
@@ -169,8 +131,7 @@ const DEFAULT_SETTINGS = {
   studio_address: 'Rua Aiapaina, 3A — Tatuapé',
   consent_text:
     'Declaro que as informações prestadas nesta ficha são verdadeiras e que fui informada sobre o procedimento, seus cuidados, riscos e contraindicações. Autorizo a realização do procedimento e me comprometo a seguir as orientações de pós-cuidado. Autorizo o armazenamento destes dados pessoais e de saúde exclusivamente para fins de atendimento, conforme a LGPD (Lei 13.709/2018).',
-  // Mensagem pronta do botão WhatsApp (editável em Mais → Ajustes).
-  // Campos trocados automaticamente: [nome] [data] [horário] [procedimento] [valor]
+  // Mensagem pronta do botão WhatsApp. Campos trocados automaticamente: [nome] [data] [horário] [procedimento] [valor]
   whatsapp_template: [
     'Olá! Tudo bem? 🤍',
     '',
@@ -192,32 +153,18 @@ const DEFAULT_SETTINGS = {
   wa_reply_reschedule: 'Sem problemas, [nome]! Já avisei aqui e logo te chamo para encontrarmos um novo horário 🤍',
 };
 
-export function seed() {
+export async function seed() {
   const t = nowIso();
-  const count = db.prepare('SELECT COUNT(*) AS n FROM procedures').get().n;
-  if (count === 0) {
-    const ins = db.prepare(
-      'INSERT INTO procedures (name, description, price_cents, duration_min, sort, created_at, updated_at) VALUES (?,?,?,?,?,?,?)'
-    );
-    CATALOG.forEach(([n, d, p, m], i) => ins.run(n, d, p, m, i, t, t));
+  const { n } = await db.prepare('SELECT COUNT(*) AS n FROM procedures').get();
+  if (n === 0) {
+    for (const [i, [name, d, p, m]] of CATALOG.entries())
+      await db.prepare('INSERT INTO procedures (name, description, price_cents, duration_min, sort, created_at, updated_at) VALUES (?,?,?,?,?,?,?)').run(name, d, p, m, i, t, t);
   }
-  const insSet = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
-  for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) insSet.run(k, v);
+  for (const [k, v] of Object.entries(DEFAULT_SETTINGS))
+    await db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING').run(k, v);
 }
 
-export function getSettings() {
-  const rows = db.prepare('SELECT key, value FROM settings').all();
+export async function getSettings() {
+  const rows = await db.prepare('SELECT key, value FROM settings').all();
   return Object.fromEntries(rows.map((r) => [r.key, r.value]));
-}
-
-export function tx(fn) {
-  db.exec('BEGIN');
-  try {
-    const r = fn();
-    db.exec('COMMIT');
-    return r;
-  } catch (e) {
-    db.exec('ROLLBACK');
-    throw e;
-  }
 }

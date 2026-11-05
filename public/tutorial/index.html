@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Tutorial · Conectar o WhatsApp e o robô de confirmação</title>
+  <meta name="theme-color" content="#f8f5f0" />
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Manrope:wght@400;500;600;700;800&display=swap" />
+  <link rel="stylesheet" href="/tutorial/tutorial.css" />
+</head>
+<body>
+  <main class="wrap">
+    <a class="back" href="/#/mais/whatsapp">‹ Voltar ao app</a>
+    <header class="head">
+      <div class="eyebrow">Tutorial · Agenda Expert</div>
+      <h1>Conectar o WhatsApp <em>pelo celular</em></h1>
+      <p>Em menos de 2 minutos: conecte só com o código (sem QR code) e veja como o robô confirma os atendimentos sozinho.</p>
+    </header>
+
+    <!-- Player -->
+    <section class="player" aria-label="Vídeo tutorial">
+      <div class="stage">
+        <div class="phone" aria-hidden="true">
+          <div class="phone__notch"></div>
+          <div class="phone__screen" id="screen"></div>
+          <div class="tap" id="tap"></div>
+        </div>
+        <div class="side">
+          <div class="chapter" id="chapter"></div>
+          <p class="caption" id="caption" aria-live="polite"></p>
+        </div>
+      </div>
+      <div class="controls">
+        <button class="ctl" id="prev" aria-label="Cena anterior">⏮</button>
+        <button class="ctl ctl--main" id="play" aria-label="Reproduzir">▶</button>
+        <button class="ctl" id="next" aria-label="Próxima cena">⏭</button>
+        <div class="bar" id="bar" role="slider" aria-label="Progresso"><div class="bar__fill" id="fill"></div><div class="bar__marks" id="marks"></div></div>
+        <span class="time" id="time">0:00</span>
+        <button class="ctl ctl--speed" id="speed" aria-label="Velocidade">1x</button>
+      </div>
+    </section>
+
+    <!-- Passo a passo com prints -->
+    <section class="steps">
+      <h2>Passo a passo com prints</h2>
+
+      <h3>Parte 1 · Gerar o código no app</h3>
+      <ol class="grid">
+        <li><figure><img src="/tutorial/shots/01-mais.jpg" alt="Tela Mais do app com a opção WhatsApp" loading="lazy"><figcaption><b>1.</b> No app, toque em <b>Mais</b> (barra de baixo) e depois em <b>WhatsApp</b>.</figcaption></figure></li>
+        <li><figure><img src="/tutorial/shots/02-whatsapp.jpg" alt="Tela WhatsApp com os botões de conexão" loading="lazy"><figcaption><b>2.</b> Toque em <b>Conectar com número</b>. (O QR code é para quando o app está aberto no computador.)</figcaption></figure></li>
+        <li><figure><img src="/tutorial/shots/03-numero.jpg" alt="Campo para digitar o número do WhatsApp do estúdio" loading="lazy"><figcaption><b>3.</b> Digite o <b>número do WhatsApp do estúdio</b> com DDD e toque em <b>Gerar código</b>.</figcaption></figure></li>
+        <li><figure><img src="/tutorial/shots/04-codigo.jpg" alt="Código de 8 caracteres gerado pelo app" loading="lazy"><figcaption><b>4.</b> O app mostra um <b>código de 8 letras</b>. Anote ou deixe a tela aberta. <i>(O código da imagem é só um exemplo.)</i></figcaption></figure></li>
+      </ol>
+
+      <h3>Parte 2 · Digitar o código no WhatsApp</h3>
+      <ol class="grid grid--wa">
+        <li><div class="mini" data-mini="notif"></div><p><b>5.</b> Chega uma <b>notificação do WhatsApp</b> pedindo o código — toque nela. <i>Se não chegar, siga os passos 6 e 7.</i></p></li>
+        <li><div class="mini" data-mini="settings"></div><p><b>6.</b> No WhatsApp, abra <b>Configurações</b> → <b>Aparelhos conectados</b> → <b>Conectar um aparelho</b>.</p></li>
+        <li><div class="mini" data-mini="camera"></div><p><b>7.</b> Na tela da câmera, toque em <b>Conectar com número de telefone</b> (embaixo).</p></li>
+        <li><div class="mini" data-mini="code"></div><p><b>8.</b> Digite o <b>código de 8 letras</b> que o app mostrou. Pronto!</p></li>
+      </ol>
+
+      <h3>Parte 3 · Ligar o robô</h3>
+      <ol class="grid">
+        <li><figure><img src="/tutorial/shots/05-conectado.jpg" alt="WhatsApp conectado no app" loading="lazy"><figcaption><b>9.</b> Volte ao app: aparece <b>WhatsApp conectado</b> com o seu número.</figcaption></figure></li>
+        <li><figure><img src="/tutorial/shots/06-automatico.jpg" alt="Configuração do envio automático" loading="lazy"><figcaption><b>10.</b> Em <b>Envio automático</b>, ligue a chave, escolha <b>No dia</b> ou <b>Na véspera</b> e o horário. Toque em <b>Salvar</b>.</figcaption></figure></li>
+        <li><figure><img src="/tutorial/shots/07-mensagens.jpg" alt="Mensagens do robô com prévia" loading="lazy"><figcaption><b>11.</b> Se quiser, ajuste as <b>mensagens</b> — a prévia mostra como a cliente vai receber.</figcaption></figure></li>
+      </ol>
+
+      <h3>Como o robô funciona</h3>
+      <div class="how">
+        <div class="how__item"><span class="n">1</span><div><b>Envia sozinho</b><p>No horário escolhido, manda a confirmação para cada atendimento <b>Agendada</b> — uma vez só, com pausa entre uma cliente e outra.</p></div></div>
+        <div class="how__item"><span class="n ok">✓</span><div><b>Cliente responde “1” ou “confirmo”</b><p>O atendimento vira <b>Confirmada</b> na agenda e o robô agradece.</p></div></div>
+        <div class="how__item"><span class="n warn">↺</span><div><b>Cliente responde “2” ou “preciso remarcar”</b><p>A agenda mostra <b>Pediu para remarcar</b> e o robô avisa que você vai chamar. O horário não é cancelado sozinho.</p></div></div>
+        <div class="how__item"><span class="n mute">…</span><div><b>Qualquer outra mensagem</b><p>O robô fica em silêncio — a conversa é sua.</p></div></div>
+      </div>
+
+      <div class="tip"><b>Dicas:</b> mantenha o celular do estúdio com internet de vez em quando (o WhatsApp desconecta aparelhos parados por mais de 14 dias). Para desligar o robô, toque em <b>Desconectar</b> no app ou remova em <b>Aparelhos conectados</b> no WhatsApp.</div>
+    </section>
+  </main>
+  <script src="/tutorial/tutorial.js"></script>
+</body>
+</html>

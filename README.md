@@ -3,14 +3,16 @@
 Agenda, clientes, anamnese, catálogo e financeiro do estúdio **Esther Lino Bio Estética**.
 É um PWA (Progressive Web App) que se instala no iPhone pelo Safari, sem App Store nem a taxa anual da Apple Developer.
 
-- **Back-end:** Node.js 22.13 ou mais novo, com API própria e banco relacional SQLite embutido (`node:sqlite`). Não depende de nenhum pacote externo.
+- **Back-end:** Node.js 22.13 ou mais novo, com API própria.
+- **Banco de dados:** Postgres no **Supabase**, online e gratuito, pela variável `DATABASE_URL`. As tabelas estão em [`supabase/schema.sql`](supabase/schema.sql). Sem `DATABASE_URL`, o app usa um Postgres embutido (PGlite) gravado em `data/`, para rodar no computador e nos testes.
 - **Front-end:** HTML, CSS e JavaScript puro, pensado primeiro para o celular e com service worker para uso offline.
 - **Visual:** tons de marfim, dourado e marrom, com as fontes Cormorant Garamond (títulos) e Manrope (textos).
 
 ## Como rodar
 
 ```bash
-cp .env.example .env      # defina ADMIN_EMAIL e ADMIN_PASSWORD
+cp .env.example .env      # defina ADMIN_EMAIL, ADMIN_PASSWORD (e DATABASE_URL para usar o Supabase)
+npm install
 npm start                 # http://localhost:5173
 ```
 
@@ -30,10 +32,12 @@ Fica em **Mais → WhatsApp** e é gratuito: conecta o WhatsApp do estúdio como
    - Qualquer outra mensagem fica para você responder; o robô não se mete na conversa.
 4. **Todas as mensagens** (confirmação, instruções e respostas) podem ser editadas nessa tela, com prévia.
 
+**Tutorial em vídeo:** em `/tutorial/` há um vídeo animado de como conectar só com o código e de como o robô funciona, além do passo a passo com prints. Ele também abre pelo botão **▶ Tutorial** em Mais → WhatsApp. Se as telas mudarem, gere os prints de novo com o app rodando (`PRINT_EMAIL=... PRINT_PASSWORD=... npm run prints -- http://localhost:5173`); o comando usa o Edge ou o Chrome sem abrir janela.
+
 **Limites:**
 - **Sem botões.** O WhatsApp só permite botões clicáveis na API oficial e paga da Meta; por isso a cliente responde com números.
 - **Uso não oficial.** A conexão usa a biblioteca [Baileys](https://github.com/WhiskeySockets/Baileys). O WhatsApp pode restringir números que mandam muitas mensagens, então use com moderação.
-- **Sessão no servidor.** A conexão fica salva em `DATA_DIR/whatsapp-auth` e volta sozinha quando o servidor reinicia. Para desligar o robô no servidor, defina `WHATSAPP=0`.
+- **Sessão guardada no banco.** A conexão fica salva no banco (tabela `wa_auth`) e volta sozinha quando o servidor reinicia. Para desligar o robô no servidor, defina `WHATSAPP=0`.
 
 ## Testes automáticos
 
@@ -41,7 +45,11 @@ Fica em **Mais → WhatsApp** e é gratuito: conecta o WhatsApp do estúdio como
 npm test
 ```
 
-São 80 testes, que rodam num banco temporário sem mexer nos seus dados. Eles cobrem:
+```bash
+npm run test:postgres
+```
+
+São 81 testes, que rodam num banco temporário sem mexer nos seus dados. O `test:postgres` roda os testes da API conectando por `DATABASE_URL`, pelo protocolo de rede do Postgres, do mesmo jeito que o app conecta no Supabase. Eles cobrem:
 
 - login e sessão, incluindo o limite de tentativas;
 - clientes e anamnese;
@@ -70,16 +78,26 @@ Nesse modo, sem HTTPS, o app funciona normalmente, mas a consulta offline e a in
 
 O app ganha ícone próprio e abre em tela cheia.
 
+## Banco de dados online (Supabase)
+
+Os dados ficam no **Supabase**, um Postgres online e gratuito. Clientes, agendamentos, anamneses, financeiro, estoque, ajustes e a conexão do WhatsApp **ficam sempre salvos**, mesmo que o servidor do Render reinicie ou "durma".
+
+- **Conexão:** o app conecta pela `DATABASE_URL` (Supabase → **Connect → Session pooler**) e cria as tabelas sozinho na primeira vez.
+- **Segurança:** as tabelas têm **RLS ligado e nenhuma política**. Assim, a API pública do Supabase não expõe nada; só o servidor do app acessa.
+- **Aviso:** se o app estiver hospedado **sem** `DATABASE_URL`, aparece um **aviso vermelho** em todas as telas.
+
+O passo a passo está em [DEPLOY.md](DEPLOY.md).
+
 ## Cópias de segurança (RNF07)
 
-- O servidor grava **uma cópia por dia** em `data/backups/` e mantém as últimas 30 (`BACKUP_KEEP`).
-- Para listar as cópias: `npm run backups`.
-- Para restaurar: pare o servidor e rode `npm run restaurar -- data/backups/agenda-expert-AAAA-MM-DD.db`. O estado atual é guardado antes da troca.
+- O Supabase guarda o banco online.
 - No app, em **Mais → Baixar cópia de segurança**, sai um arquivo JSON com todos os dados.
+- O servidor também grava uma cópia JSON por dia em `data/backups/` (as últimas 30). Para listar: `npm run backups`.
+- Para restaurar uma cópia, com a `DATABASE_URL` certa no `.env`: `npm run restaurar -- arquivo.json`. Isso **substitui** os dados atuais.
 
 ## Hospedagem (RSIS03)
 
-O passo a passo para publicar com **GitHub + Render** está em [DEPLOY.md](DEPLOY.md). O `render.yaml` já está pronto, com plano Starter e disco persistente.
+O passo a passo para publicar com **Supabase + GitHub + Render** está em [DEPLOY.md](DEPLOY.md). O `render.yaml` já está pronto para o plano Free, porque os dados ficam no Supabase.
 
 Em produção, com `NODE_ENV=production`, o servidor liga o cookie `Secure`, o HSTS e a leitura do IP real atrás do proxy. Ele também responde em `/api/health` para o Render verificar se está no ar. A versão do service worker é gerada automaticamente a cada mudança nos arquivos, então os aparelhos se atualizam sozinhos.
 
@@ -89,6 +107,7 @@ Em produção, com `NODE_ENV=production`, o servidor liga o cookie `Secure`, o H
 |---|---|
 | RF01 e RNF06: login com senha em hash (scrypt) e sessão HttpOnly | `server/auth.js`, `views/login.js` |
 | RF03 a RF07, RN13 e RN14: clientes, busca, anamnese, termo e inativação | `views/clients.js`, `/api/clients` |
+| RSIS02: banco de dados relacional (Postgres/Supabase) | `supabase/schema.sql`, `server/db.js` |
 | RF08, RF09 e RN08: catálogo com os 9 procedimentos e preço congelado no agendamento | `server/db.js`, `views/procedures.js` |
 | RF10 a RF15 e RN02 a RN07: agendamento, término automático, conflitos, status e motivo | `views/appointment.js`, `/api/appointments` |
 | RN12: aviso de manutenção de cílios antes de 20 dias | `softWarnings` em `server/api.js` |

@@ -54,7 +54,7 @@ function startServer(extraEnv = {}) {
   return new Promise(async (resolve, reject) => {
     const proc = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'server/index.js'], {
       cwd: ROOT,
-      env: { ...process.env, PORT: String(PORT), DATA_DIR: DATA, ADMIN_EMAIL: EMAIL, ADMIN_PASSWORD: PASS, ADMIN_NAME: 'Teste', TRUST_PROXY: '1', NODE_ENV: 'test', ...extraEnv },
+      env: { ...process.env, NO_DOTENV: '1', PORT: String(PORT), DATA_DIR: DATA, ADMIN_EMAIL: EMAIL, ADMIN_PASSWORD: PASS, ADMIN_NAME: 'Teste', TRUST_PROXY: '1', NODE_ENV: 'test', ...extraEnv },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let log = '';
@@ -114,12 +114,13 @@ test('RF01/RNF06: login correto cria sessão HttpOnly e SameSite', async () => {
 });
 
 test('RNF06: senha armazenada com hash (scrypt), nunca em texto', async () => {
-  const { DatabaseSync } = await import('node:sqlite');
-  const db = new DatabaseSync(path.join(DATA, 'agenda-expert.db'), { readOnly: true });
-  const u = db.prepare('SELECT password_hash FROM users').get();
-  db.close();
-  assert.match(u.password_hash, /^scrypt\$/);
-  assert.ok(!u.password_hash.includes(PASS));
+  const { hashPassword, verifyPassword } = await import('../server/auth.js');
+  const h = hashPassword(PASS);
+  assert.match(h, /^scrypt\$/);
+  assert.ok(!h.includes(PASS));
+  assert.notEqual(h, hashPassword(PASS), 'sal aleatório: o mesmo texto gera hashes diferentes');
+  assert.ok(verifyPassword(PASS, h));
+  assert.ok(!verifyPassword('outra', h));
 });
 
 // ------------------------------------------------------------------ Ajustes
@@ -538,8 +539,12 @@ test('RF28: estoque com entrada, saída e quantidade mínima', async () => {
 
 // ------------------------------------------------------------------ Backup (RNF07)
 test('RNF07: backup diário gravado e download completo sem senhas', async () => {
-  const files = fs.readdirSync(path.join(DATA, 'backups'));
-  assert.ok(files.some((f) => /^agenda-expert-\d{4}-\d{2}-\d{2}\.db$/.test(f)));
+  let files = [];
+  for (let i = 0; i < 50 && !files.length; i++) {
+    files = fs.existsSync(path.join(DATA, 'backups')) ? fs.readdirSync(path.join(DATA, 'backups')) : [];
+    if (!files.length) await new Promise((r) => setTimeout(r, 200));
+  }
+  assert.ok(files.some((f) => /^agenda-expert-\d{4}-\d{2}-\d{2}\.json$/.test(f)), 'cópia diária gravada');
   const r = await get('/api/backup');
   assert.equal(r.status, 200);
   assert.match(r.headers.get('content-disposition'), /agenda-expert-backup/);
@@ -622,27 +627,35 @@ test('limita tentativas de login (força bruta)', async () => {
 
 // ------------------------------------------------------------------ Desempenho (RNF04/RNF10)
 test('RNF10: 5.000 clientes e 10 anos de atendimentos sem lentidão', async () => {
-  const { DatabaseSync } = await import('node:sqlite');
-  const db = new DatabaseSync(path.join(DATA, 'agenda-expert.db'));
-  const t = new Date().toISOString();
-  db.exec('BEGIN');
-  const ic = db.prepare('INSERT INTO clients (name, phone, phone_digits, created_at, updated_at) VALUES (?,?,?,?,?)');
-  const ia = db.prepare("INSERT INTO appointments (client_id, date, start_at, end_at, status, total_cents, duration_min, created_at, updated_at) VALUES (?,?,?,?,'concluida',5000,30,?,?)");
-  const ip = db.prepare("INSERT INTO appointment_procedures (appointment_id, procedure_id, name, price_cents, duration_min) VALUES (?,2,'Design de sobrancelha',5000,30)");
-  const first = Number(ic.run('Cliente 0', '(11) 90000-0000', '11900000000', t, t).lastInsertRowid);
-  for (let i = 1; i < 5000; i++) ic.run(`Cliente ${i}`, `(11) 9${String(i).padStart(4, '0')}-0000`, `119${String(i).padStart(4, '0')}0000`, t, t);
-  // ~8 atendimentos por dia útil durante 10 anos ≈ 25 mil
-  const start = Date.UTC(2015, 0, 1);
-  for (let d = 0; d < 3650; d++) {
-    const date = new Date(start + d * 864e5).toISOString().slice(0, 10);
-    for (let k = 0; k < 7; k++) {
-      const h = String(8 + k).padStart(2, '0');
-      const id = ia.run(first + ((d * 7 + k) % 5000), date, `${date}T${h}:00:00-03:00`, `${date}T${h}:30:00-03:00`, t, t).lastInsertRowid;
-      ip.run(id);
-    }
+  // carga em massa direto no banco (servidor parado), usando o próprio Postgres
+  await stopServer(server);
+  // mesmo banco que o servidor usa: Postgres pela DATABASE_URL (ex.: Supabase) ou o embutido
+  let pg;
+  if (process.env.DATABASE_URL) {
+    const { default: PG } = await import('pg');
+    pg = new PG.Client({ connectionString: process.env.DATABASE_URL });
+    await pg.connect();
+    pg.close = () => pg.end();
+  } else {
+    const { PGlite } = await import('@electric-sql/pglite');
+    pg = await PGlite.create(path.join(DATA, 'pgdata'));
   }
-  db.exec('COMMIT');
-  db.close();
+  const t = new Date().toISOString();
+  await pg.query(`INSERT INTO clients (name, phone, phone_digits, created_at, updated_at)
+    SELECT 'Cliente ' || i, '(11) 9' || lpad(i::text, 4, '0') || '-0000', '119' || lpad(i::text, 4, '0') || '0000', $1, $1 FROM generate_series(0, 4999) i`, [t]);
+  const first = (await pg.query("SELECT id FROM clients WHERE name = 'Cliente 0'")).rows[0].id;
+  // ~7 atendimentos por dia durante 10 anos ≈ 25 mil
+  await pg.query(`INSERT INTO appointments (client_id, date, start_at, end_at, status, total_cents, duration_min, created_at, updated_at)
+    SELECT $1 + ((d * 7 + k) % 5000), to_char(dia, 'YYYY-MM-DD'),
+      to_char(dia, 'YYYY-MM-DD') || 'T' || lpad((8 + k)::text, 2, '0') || ':00:00-03:00',
+      to_char(dia, 'YYYY-MM-DD') || 'T' || lpad((8 + k)::text, 2, '0') || ':30:00-03:00', 'concluida', 5000, 30, $2, $2
+    FROM generate_series(0, 3649) d CROSS JOIN generate_series(0, 6) k CROSS JOIN LATERAL (SELECT DATE '2015-01-01' + d AS dia) x`, [first, t]);
+  await pg.query(`INSERT INTO appointment_procedures (appointment_id, procedure_id, name, price_cents, duration_min)
+    SELECT id, 2, 'Design de sobrancelha', 5000, 30 FROM appointments WHERE date < '2025-01-01'`);
+  const n = (await pg.query('SELECT COUNT(*)::int AS n FROM appointments')).rows[0].n;
+  await pg.close();
+  assert.ok(n > 25000, `${n} atendimentos`);
+  server = await startServer();
   await post('/api/login', { email: EMAIL, password: PASS }, { headers: { 'X-Forwarded-For': '10.9.9.9' } });
   const timed = async (p) => { const t0 = performance.now(); const r = await get(p); assert.equal(r.status, 200, p); return performance.now() - t0; };
   const times = {

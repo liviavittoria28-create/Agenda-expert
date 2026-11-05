@@ -7,8 +7,10 @@ import path from 'node:path';
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-wa-'));
 process.env.WA_NO_DELAY = '1';
+process.env.PGLITE_MEMORY = '1'; // banco Postgres em memória só para o teste
+delete process.env.DATABASE_URL;
 const L = await import('../server/wa-logic.js');
-const { db, seed, nowIso, getSettings } = await import('../server/db.js');
+const { db, seed, nowIso, getSettings, initDb } = await import('../server/db.js');
 const W = await import('../server/whatsapp.js');
 const { todayBR, addDays } = await import('../server/time.js');
 
@@ -68,29 +70,31 @@ let ids = {};
 const today = todayBR();
 const tomorrow = addDays(today, 1);
 
-after(() => {
-  try { db.close(); } catch {}
+after(async () => {
+  try { await db.close(); } catch {}
   fs.rmSync(process.env.DATA_DIR, { recursive: true, force: true });
 });
+const one = (sql, ...p) => db.prepare(sql).get(...p);
 
-before(() => {
-  seed();
+before(async () => {
+  await initDb();
+  await seed();
   const t = nowIso();
   const old = new Date(Date.now() - 864e5).toISOString();
-  const client = (n, p) => Number(db.prepare('INSERT INTO clients (name, phone, phone_digits, created_at, updated_at) VALUES (?,?,?,?,?)').run(n, p, p.replace(/\D/g, ''), t, t).lastInsertRowid);
-  const appt = (cid, date, start, status = 'agendada') => {
-    const id = Number(db.prepare(`INSERT INTO appointments (client_id, date, start_at, end_at, status, total_cents, duration_min, created_at, updated_at) VALUES (?,?,?,?,?,18000,60,?,?)`)
-      .run(cid, date, `${date}T${start}:00-03:00`, `${date}T${start}:00-03:00`, status, old, old).lastInsertRowid);
-    db.prepare("INSERT INTO appointment_procedures (appointment_id, procedure_id, name, price_cents, duration_min) VALUES (?,7,'Lash lifting',18000,60)").run(id);
+  const client = async (n, p) => (await db.prepare('INSERT INTO clients (name, phone, phone_digits, created_at, updated_at) VALUES (?,?,?,?,?)').run(n, p, p.replace(/\D/g, ''), t, t)).lastInsertRowid;
+  const appt = async (cid, date, start, status = 'agendada') => {
+    const id = (await db.prepare(`INSERT INTO appointments (client_id, date, start_at, end_at, status, total_cents, duration_min, created_at, updated_at) VALUES (?,?,?,?,?,18000,60,?,?)`)
+      .run(cid, date, `${date}T${start}:00-03:00`, `${date}T${start}:00-03:00`, status, old, old)).lastInsertRowid;
+    await db.prepare("INSERT INTO appointment_procedures (appointment_id, procedure_id, name, price_cents, duration_min) VALUES (?,7,'Lash lifting',18000,60)").run(id);
     return id;
   };
-  ids.ana = client('Ana Paula Souza', '(11) 99999-0000');
-  ids.bia = client('Beatriz Lopes', '(11) 95555-4444');
-  ids.semZap = client('Sem WhatsApp', '(11) 90000-0001');
-  ids.a1 = appt(ids.ana, tomorrow, '10:00');
-  ids.a2 = appt(ids.bia, tomorrow, '14:00');
-  ids.a3 = appt(ids.semZap, tomorrow, '16:00');
-  ids.a4 = appt(ids.bia, tomorrow, '18:00', 'cancelada');
+  ids.ana = await client('Ana Paula Souza', '(11) 99999-0000');
+  ids.bia = await client('Beatriz Lopes', '(11) 95555-4444');
+  ids.semZap = await client('Sem WhatsApp', '(11) 90000-0001');
+  ids.a1 = await appt(ids.ana, tomorrow, '10:00');
+  ids.a2 = await appt(ids.bia, tomorrow, '14:00');
+  ids.a3 = await appt(ids.semZap, tomorrow, '16:00');
+  ids.a4 = await appt(ids.bia, tomorrow, '18:00', 'cancelada');
   W._test.setSock(fakeSock);
   W._test.st.status = 'connected';
 });
@@ -103,13 +107,12 @@ test('envia a confirmação com a mensagem da Esther e registra', async () => {
   assert.match(sent[0].text, /agendado para o dia \d{2}\/\d{2}\/\d{4} \(.+\), às 10:00/);
   assert.match(sent[0].text, /Rua Aiapaina, 3A/);
   assert.match(sent[0].text, /\*1\* – Confirmo meu horário/);
-  const row = db.prepare('SELECT * FROM wa_messages WHERE appointment_id = ?').get(ids.a1);
-  assert.equal(row.status, 'sent');
+  assert.equal((await one('SELECT * FROM wa_messages WHERE appointment_id = ?', ids.a1)).status, 'sent');
 });
 
 test('número sem WhatsApp fica registrado como falha', async () => {
   await assert.rejects(W.sendConfirmation(ids.a3), /não tem WhatsApp/);
-  assert.equal(db.prepare('SELECT status FROM wa_messages WHERE appointment_id = ?').get(ids.a3).status, 'failed');
+  assert.equal((await one('SELECT status FROM wa_messages WHERE appointment_id = ?', ids.a3)).status, 'failed');
 });
 
 test('não envia para atendimento cancelado', async () => {
@@ -119,10 +122,10 @@ test('não envia para atendimento cancelado', async () => {
 test('cliente responde "1": atendimento vira Confirmada e o robô agradece', async () => {
   sent.length = 0;
   await W._test.handleIncoming({ key: { remoteJid: '551199990000@s.whatsapp.net' }, message: { conversation: '1' } });
-  assert.equal(db.prepare('SELECT status FROM appointments WHERE id = ?').get(ids.a1).status, 'confirmada');
+  assert.equal((await one('SELECT status FROM appointments WHERE id = ?', ids.a1)).status, 'confirmada');
   assert.equal(sent.length, 1);
   assert.match(sent[0].text, /^Perfeito, Ana! Seu horário de .+ às 10:00 está confirmado/);
-  const w = db.prepare('SELECT reply, reply_text FROM wa_messages WHERE appointment_id = ?').get(ids.a1);
+  const w = await one('SELECT reply, reply_text FROM wa_messages WHERE appointment_id = ?', ids.a1);
   assert.deepEqual({ ...w }, { reply: 'confirm', reply_text: '1' });
 });
 
@@ -136,8 +139,8 @@ test('resposta pelo identificador novo do WhatsApp (LID) com o número alternati
   await W.sendConfirmation(ids.a2);
   sent.length = 0;
   await W._test.handleIncoming({ key: { remoteJid: '98765432@lid', remoteJidAlt: '5511955554444@s.whatsapp.net' }, message: { extendedTextMessage: { text: 'Preciso remarcar 😕' } } });
-  assert.equal(db.prepare('SELECT status FROM appointments WHERE id = ?').get(ids.a2).status, 'agendada', 'não muda sozinho');
-  assert.equal(db.prepare('SELECT reply FROM wa_messages WHERE appointment_id = ?').get(ids.a2).reply, 'reschedule');
+  assert.equal((await one('SELECT status FROM appointments WHERE id = ?', ids.a2)).status, 'agendada', 'não muda sozinho');
+  assert.equal((await one('SELECT reply FROM wa_messages WHERE appointment_id = ?', ids.a2)).reply, 'reschedule');
   assert.equal(sent[0].jid, '98765432@lid', 'responde na mesma conversa');
   assert.match(sent[0].text, /Sem problemas, Beatriz!/);
 });
@@ -152,26 +155,44 @@ test('ignora grupos, mensagens próprias, desconhecidos e textos que não entend
 });
 
 test('envio automático: respeita liga/desliga e não envia duas vezes', async () => {
-  const set = (k, v) => db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(k, v);
-  const cid = db.prepare('SELECT id FROM clients WHERE name = ?').get('Ana Paula Souza').id;
+  const set = (k, v) => db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value').run(k, v);
+  const cid = (await one('SELECT id FROM clients WHERE name = ?', 'Ana Paula Souza')).id;
   const old = new Date(Date.now() - 864e5).toISOString();
-  const id = Number(db.prepare(`INSERT INTO appointments (client_id, date, start_at, end_at, status, total_cents, duration_min, created_at, updated_at) VALUES (?,?,?,?,'agendada',5000,30,?,?)`)
-    .run(cid, tomorrow, `${tomorrow}T19:00:00-03:00`, `${tomorrow}T19:30:00-03:00`, old, old).lastInsertRowid);
-  set('wa_mode', 'day_before');
-  set('wa_time', '00:00');
+  const id = (await db.prepare(`INSERT INTO appointments (client_id, date, start_at, end_at, status, total_cents, duration_min, created_at, updated_at) VALUES (?,?,?,?,'agendada',5000,30,?,?)`)
+    .run(cid, tomorrow, `${tomorrow}T19:00:00-03:00`, `${tomorrow}T19:30:00-03:00`, old, old)).lastInsertRowid;
+  await set('wa_mode', 'day_before');
+  await set('wa_time', '00:00');
   sent.length = 0;
-  set('wa_auto', '0');
+  await set('wa_auto', '0');
   await W.runScheduler();
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(sent.length, 0, 'desligado não envia');
-  set('wa_auto', '1');
+  await set('wa_auto', '1');
   await W.runScheduler();
-  await new Promise((r) => setTimeout(r, 200));
+  await new Promise((r) => setTimeout(r, 300));
   assert.equal(sent.length, 1, 'só o novo atendimento (os outros já foram enviados ou falharam)');
   assert.match(sent[0].text, /às 19:00/);
   await W.runScheduler();
-  await new Promise((r) => setTimeout(r, 200));
+  await new Promise((r) => setTimeout(r, 300));
   assert.equal(sent.length, 1, 'não reenvia');
-  assert.equal(getSettings().wa_auto, '1');
+  assert.equal((await getSettings()).wa_auto, '1');
   assert.ok(id);
+});
+
+test('sessão do WhatsApp fica guardada no banco (sobrevive a reinícios)', async () => {
+  const B = await import('@whiskeysockets/baileys');
+  const a = await W._test.useDbAuthState(B);
+  a.state.creds.me = { id: '5511999990000:1@s.whatsapp.net', name: 'Studio' };
+  await a.saveCreds();
+  await a.state.keys.set({ 'pre-key': { 1: { public: Buffer.from([1, 2, 3]), private: Buffer.from([4, 5]) } }, session: { abc: Buffer.from('xyz') } });
+  // "reinício": lê tudo de novo do banco
+  const b = await W._test.useDbAuthState(B);
+  assert.equal(b.state.creds.me.id, '5511999990000:1@s.whatsapp.net');
+  assert.ok(Buffer.isBuffer(b.state.creds.noiseKey.private), 'chaves continuam binárias');
+  assert.ok(b.state.creds.noiseKey.private.equals(a.state.creds.noiseKey.private));
+  const k = await b.state.keys.get('pre-key', ['1', '2']);
+  assert.deepEqual([...k['1'].public], [1, 2, 3]);
+  assert.equal(k['2'], null);
+  await b.state.keys.set({ 'pre-key': { 1: null } });
+  assert.equal((await b.state.keys.get('pre-key', ['1']))['1'], null, 'apaga chave removida');
 });

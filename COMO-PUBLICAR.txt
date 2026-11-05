@@ -1,0 +1,32 @@
+AGENDA EXPERT — COMO PUBLICAR
+==============================
+
+Este pacote já vem com o arquivo .env configurado e testado:
+  • banco de dados Supabase conectado (projeto ziowtcrjcymtunipsugh)
+  • acesso da Esther (ADMIN_EMAIL e ADMIN_PASSWORD)
+
+⚠️  O .env TEM SENHAS. Nunca deixe o repositório do GitHub como "Public".
+
+-------------------------------------------------------------------
+JEITO RECOMENDADO (mais seguro): variáveis no Render
+-------------------------------------------------------------------
+1. Suba esta pasta para o GitHub (repositório PRIVADO), pelo GitHub Desktop.
+   O .gitignore já deixa o .env de fora automaticamente.
+2. No Render: New + → Blueprint → escolha o repositório.
+3. Quando o Render pedir as variáveis, copie do arquivo .env:
+      ADMIN_EMAIL   → a linha ADMIN_EMAIL
+      ADMIN_PASSWORD→ a linha ADMIN_PASSWORD
+      DATABASE_URL  → a linha DATABASE_URL (inteira, do jeito que está)
+4. Apply. Em "Logs" deve aparecer:
+      ✓ Banco de dados online conectado (Postgres/Supabase)
+
+-------------------------------------------------------------------
+Conferir depois de publicar
+-------------------------------------------------------------------
+• No app, em Mais, aparece "Dados salvos online ✓".
+• Cadastre uma cliente, clique no Render em Manual Deploy → Restart service,
+  abra o app de novo: a cliente continua lá.
+• iPhone: abra o endereço no Safari → Compartilhar → Adicionar à Tela de Início.
+
+Rodar no computador (opcional):  npm install   e depois   npm start
+Guia completo: DEPLOY.md

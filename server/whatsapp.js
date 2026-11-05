@@ -1,14 +1,11 @@
 // Conexão com o WhatsApp (via QR code, como o WhatsApp Web) e robô de confirmação.
 // Usa a biblioteca Baileys (não oficial). Gratuito, mas o WhatsApp pode restringir
 // números que enviam mensagens em massa — por isso há pausas e limites.
-import fs from 'node:fs';
-import path from 'node:path';
 import QRCode from 'qrcode';
-import { db, DATA_DIR, getSettings, nowIso } from './db.js';
+import { db, getSettings, nowIso } from './db.js';
 import { todayBR, toMin, stampTime } from './time.js';
 import { fullNumber, phoneKey, jidNumber, parseReply, fillTemplate, confirmationMessage, dueAppointments, targetDate, humanDelay } from './wa-logic.js';
 
-const AUTH_DIR = path.join(DATA_DIR, 'whatsapp-auth');
 const MAX_PER_RUN = 40;
 
 const st = { status: 'disconnected', qr: null, pairing: null, me: null, error: null, sending: false };
@@ -21,7 +18,49 @@ const noop = () => {};
 const logger = { level: 'silent', child: () => logger, trace: noop, debug: noop, info: noop, warn: noop, error: noop, fatal: noop };
 
 export const waState = () => ({ status: st.status, qr: st.qr, pairing: st.pairing, me: st.me, error: st.error, sending: st.sending });
-const hasSession = () => fs.existsSync(path.join(AUTH_DIR, 'creds.json'));
+const hasSession = async () => !!(await db.prepare("SELECT 1 AS ok FROM wa_auth WHERE key = 'creds'").get());
+
+// ---------------------------------------------------------------- Sessão guardada no banco (Supabase)
+// Assim a conexão sobrevive a reinícios do servidor, mesmo em hospedagem que apaga o disco.
+async function useDbAuthState(B) {
+  const enc = (v) => JSON.stringify(v, B.BufferJSON.replacer);
+  const dec = (s) => JSON.parse(s, B.BufferJSON.reviver);
+  const write = (key, value) => db.prepare('INSERT INTO wa_auth (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value').run(key, enc(value));
+  const row = await db.prepare("SELECT value FROM wa_auth WHERE key = 'creds'").get();
+  const creds = row ? dec(row.value) : B.initAuthCreds();
+  return {
+    state: {
+      creds,
+      keys: {
+        get: async (type, ids) => {
+          const data = {};
+          if (!ids.length) return data;
+          const rows = await db.prepare('SELECT key, value FROM wa_auth WHERE key = ANY(?)').all(ids.map((id) => `${type}-${id}`));
+          const map = new Map(rows.map((r) => [r.key, r.value]));
+          for (const id of ids) {
+            const raw = map.get(`${type}-${id}`);
+            let value = raw ? dec(raw) : null;
+            if (type === 'app-state-sync-key' && value) value = B.proto.Message.AppStateSyncKeyData.fromObject(value);
+            data[id] = value;
+          }
+          return data;
+        },
+        set: async (data) => {
+          for (const category in data) {
+            for (const id in data[category]) {
+              const value = data[category][id];
+              const key = `${category}-${id}`;
+              if (value) await write(key, value);
+              else await db.prepare('DELETE FROM wa_auth WHERE key = ?').run(key);
+            }
+          }
+        },
+      },
+    },
+    saveCreds: () => write('creds', creds),
+  };
+}
+const clearSession = () => db.prepare('DELETE FROM wa_auth').run();
 
 // ---------------------------------------------------------------- Conexão
 /**
@@ -41,8 +80,7 @@ export async function connect({ phone } = {}) {
   st.error = null;
   const B = await import('@whiskeysockets/baileys');
   const makeWASocket = B.default?.default || B.default || B.makeWASocket;
-  fs.mkdirSync(AUTH_DIR, { recursive: true });
-  const { state: auth, saveCreds } = await B.useMultiFileAuthState(AUTH_DIR);
+  const { state: auth, saveCreds } = await useDbAuthState(B);
   const version = await waVersion(B);
   sock = makeWASocket({
     auth, version, logger,
@@ -53,7 +91,7 @@ export async function connect({ phone } = {}) {
     shouldSyncHistoryMessage: () => false,
   });
   const current = sock;
-  sock.ev.on('creds.update', saveCreds);
+  sock.ev.on('creds.update', () => saveCreds().catch((e) => console.error('WhatsApp (sessão):', e.message)));
   if (phone && !auth.creds.registered) {
     await new Promise((r) => setTimeout(r, 2500)); // a conexão precisa estar aberta antes de pedir o código
     st.pairing = formatCode(await sock.requestPairingCode(fullNumber(phone)));
@@ -83,7 +121,7 @@ export async function connect({ phone } = {}) {
       if (code === 405 || code === 426) cachedVersion = null; // versão recusada: busca de novo na próxima tentativa
       sock = null;
       if (code === B.DisconnectReason.loggedOut || code === B.DisconnectReason.forbidden) {
-        fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+        await clearSession().catch(() => {});
         Object.assign(st, { status: 'disconnected', qr: null, pairing: null, me: null, error: 'O WhatsApp foi desconectado pelo celular. Conecte de novo.' });
         wantConnected = false;
         return;
@@ -137,31 +175,32 @@ export async function logout() {
   try { await sock?.logout(); } catch {}
   try { sock?.end?.(); } catch {}
   sock = null;
-  fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+  await clearSession();
   Object.assign(st, { status: 'disconnected', qr: null, pairing: null, me: null, error: null });
   return waState();
 }
 
 /** Reconecta sozinho ao ligar o servidor, se já havia um WhatsApp conectado */
-export function autoStart() {
-  if (hasSession()) connect().catch(onError);
+export async function autoStart() {
+  if (await hasSession().catch(() => false)) connect().catch(onError);
   setInterval(() => runScheduler().catch((e) => console.error('WhatsApp (agenda):', e.message)), 60_000).unref();
 }
 
 // ---------------------------------------------------------------- Dados
-export function appointmentsOn(date) {
-  const rows = db
+export async function appointmentsOn(date) {
+  const rows = await db
     .prepare(
       `SELECT a.*, c.name AS client_name, c.phone AS client_phone, w.status AS wa_status, w.reply AS wa_reply, w.sent_at AS wa_sent_at, w.error AS wa_error
        FROM appointments a JOIN clients c ON c.id = a.client_id LEFT JOIN wa_messages w ON w.appointment_id = a.id
        WHERE a.date = ? ORDER BY a.start_at`
     )
     .all(date);
-  const procs = db.prepare('SELECT name FROM appointment_procedures WHERE appointment_id = ? ORDER BY id');
+  const ids = rows.map((r) => r.id);
+  const procs = ids.length ? await db.prepare('SELECT appointment_id, name FROM appointment_procedures WHERE appointment_id = ANY(?) ORDER BY id').all(ids) : [];
   return rows.map((r) => ({
     id: r.id, client_id: r.client_id, client_name: r.client_name, client_phone: r.client_phone, date: r.date,
     start: stampTime(r.start_at), end: stampTime(r.end_at), status: r.status, total_cents: r.total_cents, created_at: r.created_at,
-    procedures: procs.all(r.id),
+    procedures: procs.filter((p) => p.appointment_id === r.id).map((p) => ({ name: p.name })),
     wa: r.wa_status ? { status: r.wa_status, reply: r.wa_reply, sent_at: r.wa_sent_at, error: r.wa_error } : null,
   }));
 }
@@ -186,25 +225,25 @@ async function sendText(phone, text) {
 }
 
 function record(a, fields) {
-  db.prepare(
+  return db.prepare(
     `INSERT INTO wa_messages (appointment_id, phone, jid, status, error, sent_at) VALUES (?,?,?,?,?,?)
-     ON CONFLICT(appointment_id) DO UPDATE SET phone = excluded.phone, jid = excluded.jid, status = excluded.status,
-       error = excluded.error, sent_at = excluded.sent_at, reply = NULL, reply_text = NULL, replied_at = NULL`
+     ON CONFLICT (appointment_id) DO UPDATE SET phone = EXCLUDED.phone, jid = EXCLUDED.jid, status = EXCLUDED.status,
+       error = EXCLUDED.error, sent_at = EXCLUDED.sent_at, reply = NULL, reply_text = NULL, replied_at = NULL`
   ).run(a.id, fullNumber(a.client_phone), fields.jid || null, fields.status, fields.error || null, nowIso());
 }
 
 /** Envia a confirmação de um atendimento agora */
 export async function sendConfirmation(appointmentId) {
-  const a = db.prepare('SELECT date FROM appointments WHERE id = ?').get(appointmentId);
+  const a = await db.prepare('SELECT date FROM appointments WHERE id = ?').get(appointmentId);
   if (!a) throw new Error('Atendimento não encontrado.');
-  const appt = appointmentsOn(a.date).find((x) => x.id === appointmentId);
+  const appt = (await appointmentsOn(a.date)).find((x) => x.id === appointmentId);
   if (['cancelada', 'faltou', 'concluida'].includes(appt.status)) throw new Error('Este atendimento não precisa de confirmação.');
   try {
-    const jid = await sendText(appt.client_phone, confirmationMessage(getSettings(), appt));
-    record(appt, { status: 'sent', jid });
+    const jid = await sendText(appt.client_phone, confirmationMessage(await getSettings(), appt));
+    await record(appt, { status: 'sent', jid });
     return { ok: true };
   } catch (e) {
-    record(appt, { status: 'failed', error: e.message });
+    await record(appt, { status: 'failed', error: e.message });
     throw e;
   }
 }
@@ -230,16 +269,16 @@ export async function sendBatch(list) {
 }
 
 /** Pendentes da data-alvo, sem considerar horário (para o botão "Enviar todas") */
-export function pendingFor(date) {
-  return appointmentsOn(date).filter((a) => a.status === 'agendada' && (!a.wa || a.wa.status === 'failed'));
+export async function pendingFor(date) {
+  return (await appointmentsOn(date)).filter((a) => a.status === 'agendada' && (!a.wa || a.wa.status === 'failed'));
 }
 
 export async function runScheduler() {
   if (st.status !== 'connected' || st.sending) return;
-  const settings = getSettings();
+  const settings = await getSettings();
   const today = todayBR();
   const date = targetDate(settings, today);
-  const appointments = appointmentsOn(date);
+  const appointments = await appointmentsOn(date);
   const sentIds = new Set(appointments.filter((a) => a.wa).map((a) => a.id)); // não reenvia nem quem falhou
   const now = new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
   const due = dueAppointments({ settings, today, nowMin: toMin(now), nowIso: nowIso(), appointments, sentIds });
@@ -262,21 +301,21 @@ async function handleIncoming(m) {
 
   // procura a confirmação pendente desta cliente (enviada, sem resposta, atendimento futuro)
   const keys = new Set(jids.map(jidNumber).filter(Boolean).map(phoneKey));
-  const pending = db
+  const pending = (await db
     .prepare(
       `SELECT w.*, a.status AS appt_status, a.date FROM wa_messages w JOIN appointments a ON a.id = w.appointment_id
        WHERE w.status = 'sent' AND w.reply IS NULL AND a.date >= ? AND a.status IN ('agendada','confirmada')
        ORDER BY a.start_at`
     )
-    .all(todayBR())
+    .all(todayBR()))
     .find((w) => jids.includes(w.jid) || keys.has(phoneKey(w.phone)));
   if (!pending) return;
 
-  const appt = appointmentsOn(pending.date).find((a) => a.id === pending.appointment_id);
-  const settings = getSettings();
-  db.prepare('UPDATE wa_messages SET reply = ?, reply_text = ?, replied_at = ? WHERE id = ?').run(intent, String(text).slice(0, 500), nowIso(), pending.id);
+  const appt = (await appointmentsOn(pending.date)).find((a) => a.id === pending.appointment_id);
+  const settings = await getSettings();
+  await db.prepare('UPDATE wa_messages SET reply = ?, reply_text = ?, replied_at = ? WHERE id = ?').run(intent, String(text).slice(0, 500), nowIso(), pending.id);
   if (intent === 'confirm' && appt.status === 'agendada') {
-    db.prepare("UPDATE appointments SET status = 'confirmada', updated_at = ? WHERE id = ?").run(nowIso(), appt.id);
+    await db.prepare("UPDATE appointments SET status = 'confirmada', updated_at = ? WHERE id = ?").run(nowIso(), appt.id);
   }
   const reply = fillTemplate(intent === 'confirm' ? settings.wa_reply_confirm : settings.wa_reply_reschedule, appt).trim();
   if (reply && sock) {
@@ -286,4 +325,4 @@ async function handleIncoming(m) {
 }
 
 // exportado para testes
-export const _test = { handleIncoming, st, setSock: (s) => { sock = s; } };
+export const _test = { handleIncoming, st, setSock: (s) => { sock = s; }, useDbAuthState };

@@ -73,6 +73,7 @@ export async function renderWhatsApp(main, ctx) {
           <button class="btn btn--ghost" data-pair>Conectar com número</button>
         </div>
         <p class="small muted" style="margin-top:12px">Use o QR code se abrir o app no computador. No próprio iPhone, use “Conectar com número”.</p>
+        <p class="small" style="margin-top:6px"><a href="/tutorial/">▶ Ver o vídeo de como conectar</a></p>
       </div>`;
   }
 
@@ -81,7 +82,8 @@ export async function renderWhatsApp(main, ctx) {
   main.innerHTML = `
     <div class="page">
       <header class="top" style="padding-bottom:0"><a class="back" href="#/mais">${I.left}Mais</a></header>
-      <header class="top"><div><div class="top__eyebrow">Robô de confirmação</div><h1>WhatsApp</h1></div></header>
+      <header class="top"><div><div class="top__eyebrow">Robô de confirmação</div><h1>WhatsApp</h1></div>
+        <div class="top__actions"><a class="btn btn--ghost btn--sm" href="/tutorial/">▶ Tutorial</a></div></header>
 
       <section class="card" style="padding:20px">${conn}</section>
 

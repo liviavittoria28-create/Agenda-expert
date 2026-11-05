@@ -21,45 +21,41 @@ export function verifyPassword(password, stored) {
 
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
-export function createSession(userId) {
+export async function createSession(userId) {
   const token = crypto.randomBytes(32).toString('base64url');
   const expires = new Date(Date.now() + SESSION_DAYS * 864e5).toISOString();
-  db.prepare('INSERT INTO sessions (token_hash, user_id, expires_at, created_at) VALUES (?,?,?,?)').run(
-    sha(token), userId, expires, nowIso()
-  );
+  await db.prepare('INSERT INTO sessions (token_hash, user_id, expires_at, created_at) VALUES (?,?,?,?)').run(sha(token), userId, expires, nowIso());
   return { token, maxAge: SESSION_DAYS * 86400 };
 }
 
-export function getSessionUser(token) {
+export async function getSessionUser(token) {
   if (!token) return null;
-  const row = db
-    .prepare(
-      'SELECT u.id, u.email, u.name, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?'
-    )
+  const row = await db
+    .prepare('SELECT u.id, u.email, u.name, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?')
     .get(sha(token));
   if (!row) return null;
   if (row.expires_at < nowIso()) {
-    destroySession(token);
+    await destroySession(token);
     return null;
   }
   return { id: row.id, email: row.email, name: row.name };
 }
 
-export function destroySession(token) {
-  if (token) db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(sha(token));
+export async function destroySession(token) {
+  if (token) await db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(sha(token));
 }
 
-export function upsertUser(email, password, name) {
+export async function upsertUser(email, password, name) {
   const t = nowIso();
-  const existing = db.prepare('SELECT id FROM users LIMIT 1').get();
+  const existing = await db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get();
   const h = hashPassword(password);
   if (existing) {
-    db.prepare('UPDATE users SET email = ?, password_hash = ?, name = COALESCE(?, name), updated_at = ? WHERE id = ?').run(
+    await db.prepare('UPDATE users SET email = ?, password_hash = ?, name = COALESCE(?, name), updated_at = ? WHERE id = ?').run(
       email.toLowerCase(), h, name ?? null, t, existing.id
     );
-    db.prepare('DELETE FROM sessions').run();
+    await db.prepare('DELETE FROM sessions').run();
   } else {
-    db.prepare('INSERT INTO users (email, name, password_hash, created_at, updated_at) VALUES (?,?,?,?,?)').run(
+    await db.prepare('INSERT INTO users (email, name, password_hash, created_at, updated_at) VALUES (?,?,?,?,?)').run(
       email.toLowerCase(), name || 'Esther Lino', h, t, t
     );
   }

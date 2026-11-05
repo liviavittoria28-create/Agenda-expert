@@ -2,21 +2,28 @@
   "name": "agenda-expert",
   "version": "1.0.0",
   "private": true,
-  "description": "Agenda Expert — agenda, clientes e financeiro para Esther Lino Bio Estética (PWA)",
+  "description": "Agenda Expert — agenda, clientes e financeiro para Esther Lino Bio Estética (PWA + Supabase)",
   "type": "module",
   "engines": {
     "node": ">=22.13"
   },
   "scripts": {
-    "start": "node --disable-warning=ExperimentalWarning server/index.js",
-    "dev": "node --disable-warning=ExperimentalWarning --watch-path=server server/index.js",
+    "start": "node --disable-warning=ExperimentalWarning server/boot.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch-path=server server/boot.js",
     "backups": "node --disable-warning=ExperimentalWarning server/scripts.js backups",
     "restaurar": "node server/scripts.js restaurar",
     "icones": "node scripts/make-icons.js",
-    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js"
+    "test": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 test/*.test.js",
+    "prints": "node scripts/tutorial-prints.js",
+    "test:postgres": "node --disable-warning=ExperimentalWarning scripts/test-postgres.js"
   },
   "dependencies": {
+    "@electric-sql/pglite": "0.5.15",
     "@whiskeysockets/baileys": "7.0.0-rc14",
+    "pg": "8.23.1",
     "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite-socket": "0.2.18"
   }
 }

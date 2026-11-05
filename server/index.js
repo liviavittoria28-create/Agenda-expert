@@ -1,11 +1,11 @@
-// Servidor HTTP do Agenda Expert (sem dependências externas)
+// Servidor HTTP do Agenda Expert
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
-import { db, seed } from './db.js';
+import { db, seed, initDb } from './db.js';
 import { getSessionUser, upsertUser, verifyPassword, COOKIE } from './auth.js';
 import { matchRoute, HttpError } from './api.js';
 import { startBackups } from './backup.js';
@@ -22,15 +22,23 @@ const TRUST_PROXY = process.env.TRUST_PROXY === '1' || process.env.NODE_ENV === 
 // e faz os aparelhos baixarem a atualização (service worker)
 const BUILD_ID = buildId(PUBLIC);
 
-seed();
-syncUser();
+// abre o banco (Supabase pela DATABASE_URL, ou Postgres embutido) e cria as tabelas
+try {
+  const kind = await initDb();
+  console.log(kind === 'postgres' ? '✓ Banco de dados online conectado (Postgres/Supabase)' : '✓ Banco de dados local (Postgres embutido em DATA_DIR/pgdata)');
+} catch (e) {
+  console.error(`\n✖  Não foi possível conectar ao banco de dados: ${e.message}\n   Confira a variável DATABASE_URL (connection string do Supabase).\n`);
+  process.exit(1);
+}
+await seed();
+await syncUser();
 startBackups();
-if (process.env.WHATSAPP !== "0") startWhatsApp();
+if (process.env.WHATSAPP !== '0') startWhatsApp().catch((e) => console.error('WhatsApp:', e.message));
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml',
-  '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.mp4': 'video/mp4', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8',
 };
 
 const SECURITY_HEADERS = {
@@ -59,7 +67,7 @@ async function handleApi(req, res, url) {
   if (!r) return send(res, 404, { error: 'Rota não encontrada.' });
   const cookies = parseCookies(req.headers.cookie);
   const token = cookies[COOKIE];
-  const user = getSessionUser(token);
+  const user = await getSessionUser(token);
   if (r.auth && !user) return send(res, 401, { error: 'Sessão expirada. Entre novamente.' });
 
   // proteção CSRF básica: requisições de escrita precisam vir da mesma origem
@@ -105,7 +113,8 @@ function send(res, status, data) {
 
 function serveStatic(req, res, url) {
   let p = decodeURIComponent(url.pathname);
-  if (p === '/') p = '/index.html';
+  if (p.endsWith('/')) p += 'index.html';
+  if (p === '/tutorial') p = '/tutorial/index.html';
   if (p === '/sw.js') {
     const js = fs.readFileSync(path.join(PUBLIC, 'sw.js'), 'utf8').replace(/const VERSION = '[^']*'/, `const VERSION = 'ae-${BUILD_ID}'`);
     res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache' });
@@ -123,6 +132,20 @@ function serveStatic(req, res, url) {
       'Cache-Control': ['.png', '.svg', '.ico', '.woff2'].includes(ext) ? 'public, max-age=86400' : 'no-cache',
       'Last-Modified': st?.mtime?.toUTCString?.() || new Date().toUTCString(),
     };
+    // vídeos e imagens: entrega em partes (Range), para o player poder avançar/voltar
+    if (target === file && ['.mp4', '.jpg', '.png'].includes(ext)) {
+      headers['Accept-Ranges'] = 'bytes';
+      const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+      if (m) {
+        const size = st.size;
+        let start = m[1] === '' ? Math.max(0, size - Number(m[2])) : Number(m[1]);
+        let end = m[1] !== '' && m[2] !== '' ? Math.min(Number(m[2]), size - 1) : size - 1;
+        if (start >= size || start > end) { res.writeHead(416, { ...headers, 'Content-Range': `bytes */${size}` }); return res.end(); }
+        res.writeHead(206, { ...headers, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': end - start + 1 });
+        return fs.createReadStream(target, { start, end }).pipe(res);
+      }
+      headers['Content-Length'] = st.size;
+    }
     const gzip = /\bgzip\b/.test(req.headers['accept-encoding'] || '') && ['.html', '.js', '.css', '.svg', '.json', '.webmanifest'].includes(ext);
     if (gzip) headers['Content-Encoding'] = 'gzip';
     res.writeHead(200, headers);
@@ -173,6 +196,7 @@ function buildId(dir) {
 }
 
 function loadEnv(file) {
+  if (process.env.NO_DOTENV === '1') return; // testes automáticos não usam o .env
   if (!fs.existsSync(file)) return;
   for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
     const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)\s*$/);
@@ -182,7 +206,7 @@ function loadEnv(file) {
 
 // O acesso (e-mail e senha) vem das variáveis de ambiente ADMIN_EMAIL e ADMIN_PASSWORD.
 // Para trocar, basta mudar as variáveis e reiniciar: as sessões abertas são encerradas.
-function syncUser() {
+async function syncUser() {
   const email = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
   const pw = String(process.env.ADMIN_PASSWORD || '');
   const prod = process.env.NODE_ENV === 'production';
@@ -195,12 +219,12 @@ function syncUser() {
   if (!email || !pw) return fail('Defina ADMIN_EMAIL e ADMIN_PASSWORD (arquivo .env ou variáveis do servidor).');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.includes('coloque-o-email')) return fail('ADMIN_EMAIL inválido.');
   if (pw.length < 8 || pw.includes('coloque-a-senha')) return fail('ADMIN_PASSWORD precisa ter pelo menos 8 caracteres.');
-  const user = db.prepare('SELECT * FROM users LIMIT 1').get();
+  const user = await db.prepare('SELECT * FROM users ORDER BY id LIMIT 1').get();
   if (!user) {
-    upsertUser(email, pw, process.env.ADMIN_NAME);
+    await upsertUser(email, pw, process.env.ADMIN_NAME);
     console.log(`✓ Acesso criado para ${email}`);
   } else if (user.email !== email || !verifyPassword(pw, user.password_hash) || (process.env.ADMIN_NAME && process.env.ADMIN_NAME !== user.name)) {
-    upsertUser(email, pw, process.env.ADMIN_NAME);
+    await upsertUser(email, pw, process.env.ADMIN_NAME);
     console.log(`✓ Acesso atualizado pelas variáveis de ambiente (${email}). Sessões anteriores encerradas.`);
   }
 }
@@ -211,11 +235,11 @@ server.listen(PORT, () => console.log(`Agenda Expert rodando em http://localhost
 process.on('unhandledRejection', (e) => console.error('Erro não tratado:', e?.message || e));
 process.on('uncaughtException', (e) => console.error('Exceção não tratada:', e?.stack || e));
 
-// encerramento limpo: grava o banco antes de desligar (deploys/reinícios)
+// encerramento limpo: fecha a conexão com o banco antes de desligar (deploys/reinícios)
 for (const sig of ['SIGTERM', 'SIGINT']) {
-  process.on(sig, () => {
+  process.on(sig, async () => {
     server.close();
-    try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); db.close(); } catch {}
+    await Promise.race([db.close(), new Promise((r) => setTimeout(r, 5000))]).catch(() => {});
     process.exit(0);
   });
 }

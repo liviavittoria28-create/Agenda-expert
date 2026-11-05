@@ -6,7 +6,8 @@ import { openBlockForm } from './appointment.js';
 import { waLabel } from './whatsapp.js';
 
 export async function renderMore(main) {
-  const [dash, wa] = await Promise.all([api.get('/api/dashboard').catch(() => ({})), api.get('/api/whatsapp').catch(() => null)]);
+  const [dash, wa, storage] = await Promise.all([api.get('/api/dashboard').catch(() => ({})), api.get('/api/whatsapp').catch(() => null), api.get('/api/storage').catch(() => null)]);
+  if (storage) state.storage = storage;
   const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
   const mi = (icon, title, sub, attrs) => `<button ${attrs}><span class="mi">${icon}</span><span class="grow">${title}${sub ? `<small>${sub}</small>` : ''}</span><span class="item__chev">${I.right}</span></button>`;
   main.innerHTML = `
@@ -18,6 +19,7 @@ export async function renderMore(main) {
         ${mi(I.whatsapp, 'WhatsApp', waLabel(wa), 'data-go="#/mais/whatsapp"')}
         ${mi(I.settings, 'Ajustes', 'Horário de atendimento, termo e acesso', 'data-go="#/mais/ajustes"')}
       </div>
+      ${storageCard(storage)}
       <div class="section-title">Aplicativo</div>
       <div class="card menu">
         ${standalone ? '' : mi(I.install, 'Instalar no iPhone', 'Adicionar à Tela de Início', 'data-install')}
@@ -35,6 +37,18 @@ export async function renderMore(main) {
     navigator.serviceWorker?.controller?.postMessage('logout');
     location.replace('/');
   };
+}
+
+function storageCard(s) {
+  if (!s) return '';
+  if (s.mode === 'online') {
+    return `<div class="card mt" style="padding:14px 16px;display:flex;gap:12px;align-items:center">
+      <span class="wa-dot is-on"></span>
+      <div class="grow"><b style="font-size:14.5px">Dados salvos online ✓</b>
+      <div class="small muted">Banco de dados ${esc(s.provider || 'online')} — clientes, agenda e financeiro ficam guardados mesmo se o servidor reiniciar.</div></div></div>`;
+  }
+  if (s.mode === 'disk') return `<p class="small muted mt" style="text-align:center">Dados guardados neste computador.</p>`;
+  return '';
 }
 
 function showInstall() {

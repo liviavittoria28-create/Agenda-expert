@@ -25,5 +25,5 @@ RUN mkdir -p /data
 
 EXPOSE 8080
 
-CMD ["node", "--disable-warning=ExperimentalWarning", "server/index.js"]
+CMD ["node", "--disable-warning=ExperimentalWarning", "server/boot.js"]
 
