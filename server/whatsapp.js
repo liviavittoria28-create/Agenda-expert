@@ -43,11 +43,11 @@ export async function connect({ phone } = {}) {
   const makeWASocket = B.default?.default || B.default || B.makeWASocket;
   fs.mkdirSync(AUTH_DIR, { recursive: true });
   const { state: auth, saveCreds } = await B.useMultiFileAuthState(AUTH_DIR);
-  let version;
-  try { ({ version } = await B.fetchLatestBaileysVersion()); } catch {}
+  const version = await waVersion(B);
   sock = makeWASocket({
     auth, version, logger,
-    browser: B.Browsers.macOS('Agenda Expert'),
+    // identificação padrão de navegador (nomes personalizados podem ser recusados no pareamento)
+    browser: B.Browsers.macOS('Chrome'),
     markOnlineOnConnect: false,
     syncFullHistory: false,
     shouldSyncHistoryMessage: () => false,
@@ -79,6 +79,8 @@ export async function connect({ phone } = {}) {
     if (u.connection === 'close') {
       const code = u.lastDisconnect?.error?.output?.statusCode;
       const wasQr = st.status === 'qr';
+      console.log(`WhatsApp: conexão encerrada (código ${code ?? '?'}: ${u.lastDisconnect?.error?.message || 'sem detalhes'})`);
+      if (code === 405 || code === 426) cachedVersion = null; // versão recusada: busca de novo na próxima tentativa
       sock = null;
       if (code === B.DisconnectReason.loggedOut || code === B.DisconnectReason.forbidden) {
         fs.rmSync(AUTH_DIR, { recursive: true, force: true });
@@ -105,6 +107,25 @@ export async function connect({ phone } = {}) {
 }
 
 const formatCode = (c) => String(c || '').replace(/(.{4})(?=.)/, '$1-');
+
+// Versão do WhatsApp Web: o WhatsApp recusa clientes desatualizados ("sem conexão" no celular).
+// Busca a versão atual direto do web.whatsapp.com; se falhar, usa a da biblioteca.
+let cachedVersion = null;
+async function waVersion(B) {
+  if (cachedVersion && Date.now() - cachedVersion.at < 3600e3) return cachedVersion.version;
+  const tries = [B.fetchLatestWaWebVersion, B.fetchLatestBaileysVersion];
+  for (const fn of tries) {
+    try {
+      const r = await fn?.({});
+      if (r?.version?.length === 3) {
+        cachedVersion = { version: r.version, at: Date.now() };
+        console.log(`WhatsApp: usando versão ${r.version.join('.')}`);
+        return r.version;
+      }
+    } catch {}
+  }
+  return undefined; // padrão embutido na biblioteca
+}
 
 function onError(e) {
   console.error('WhatsApp:', e.message);

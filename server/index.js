@@ -207,6 +207,10 @@ function syncUser() {
 
 server.listen(PORT, () => console.log(`Agenda Expert rodando em http://localhost:${PORT} (versão ${BUILD_ID})`));
 
+// um erro inesperado (ex.: dentro da conexão do WhatsApp) não pode derrubar o app inteiro
+process.on('unhandledRejection', (e) => console.error('Erro não tratado:', e?.message || e));
+process.on('uncaughtException', (e) => console.error('Exceção não tratada:', e?.stack || e));
+
 // encerramento limpo: grava o banco antes de desligar (deploys/reinícios)
 for (const sig of ['SIGTERM', 'SIGINT']) {
   process.on(sig, () => {
