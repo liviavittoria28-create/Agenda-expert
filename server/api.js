@@ -5,6 +5,8 @@ import {
   loginAllowed, loginFailed, loginOk, COOKIE,
 } from './auth.js';
 import { toMin, fromMin, stamp, stampTime, isDate, isTime, addDays, diffDays, weekday, fmtBR, todayBR } from './time.js';
+import * as wa from './whatsapp.js';
+import { targetDate } from './wa-logic.js';
 
 export class HttpError extends Error {
   constructor(status, message, extra = {}) {
@@ -80,7 +82,10 @@ route('PUT', '/api/account', () => {
 // ---------------------------------------------------------------- Ajustes
 route('GET', '/api/settings', () => getSettings());
 route('PUT', '/api/settings', ({ body }) => {
-  const allowed = ['open_time', 'close_time', 'work_days', 'gap_min', 'consent_text'];
+  const allowed = ['open_time', 'close_time', 'work_days', 'gap_min', 'consent_text', 'whatsapp_template', 'wa_auto', 'wa_mode', 'wa_time', 'wa_footer', 'wa_reply_confirm', 'wa_reply_reschedule'];
+  if (body.wa_time && !isTime(body.wa_time)) throw bad('Horário de envio inválido.');
+  if (body.wa_mode && !['same_day', 'day_before'].includes(body.wa_mode)) throw bad('Opção de envio inválida.');
+  if (body.wa_auto != null) body.wa_auto = body.wa_auto === true || body.wa_auto === '1' ? '1' : '0';
   if (body.open_time && !isTime(body.open_time)) throw bad('Horário de abertura inválido.');
   if (body.close_time && !isTime(body.close_time)) throw bad('Horário de fechamento inválido.');
   const up = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
@@ -253,8 +258,10 @@ route('PUT', '/api/procedures/:id', ({ params, body }) => {
 function listAppointments(where, args, order = 'ORDER BY a.start_at') {
   const rows = db
     .prepare(
-      `SELECT a.*, c.name AS client_name, c.phone AS client_phone, an.consent AS a_consent
+      `SELECT a.*, c.name AS client_name, c.phone AS client_phone, an.consent AS a_consent,
+         w.status AS wa_status, w.reply AS wa_reply, w.sent_at AS wa_sent_at, w.error AS wa_error
        FROM appointments a JOIN clients c ON c.id = a.client_id LEFT JOIN anamneses an ON an.client_id = a.client_id
+       LEFT JOIN wa_messages w ON w.appointment_id = a.id
        WHERE ${where} ${order}`
     )
     .all(...args);
@@ -280,6 +287,7 @@ function listAppointments(where, args, order = 'ORDER BY a.start_at') {
     anamnese: r.a_consent == null ? 'pendente' : r.a_consent ? 'ok' : 'rascunho',
     procedures: byAppt.get(r.id) || [],
     transaction_id: txBy.get(r.id) || null,
+    wa: r.wa_status ? { status: r.wa_status, reply: r.wa_reply, sent_at: r.wa_sent_at, error: r.wa_error } : null,
     created_at: r.created_at, updated_at: r.updated_at,
   }));
 }
@@ -706,6 +714,28 @@ route('POST', '/api/stock/:id/move', ({ params, body }) => {
 route('GET', '/api/stock/:id/moves', ({ params }) =>
   db.prepare('SELECT * FROM stock_moves WHERE item_id = ? ORDER BY id DESC LIMIT 50').all(Number(params.id))
 );
+
+// ---------------------------------------------------------------- WhatsApp (robô de confirmação)
+route('GET', '/api/whatsapp', () => {
+  const settings = getSettings();
+  const date = targetDate(settings, todayBR());
+  return { ...wa.waState(), target_date: date, appointments: wa.appointmentsOn(date) };
+});
+route('POST', '/api/whatsapp/connect', async ({ body }) => {
+  const phone = body.phone ? String(body.phone).replace(/\D/g, '') : null;
+  if (phone && phone.length < 10) throw bad('Informe o número do WhatsApp do estúdio com DDD.');
+  try { return await wa.connect({ phone }); } catch (e) { throw new HttpError(502, 'Não foi possível iniciar a conexão com o WhatsApp.'); }
+});
+route('POST', '/api/whatsapp/logout', () => wa.logout());
+route('POST', '/api/whatsapp/send', async ({ body }) => {
+  if (wa.waState().status !== 'connected') throw new HttpError(409, 'Conecte o WhatsApp primeiro.');
+  if (body.appointment_id) {
+    try { await wa.sendConfirmation(Number(body.appointment_id)); } catch (e) { throw bad(e.message); }
+    return { ok: true, sent: 1 };
+  }
+  const date = isDate(body.date) ? body.date : targetDate(getSettings(), todayBR());
+  return wa.sendBatch(wa.pendingFor(date));
+});
 
 // ---------------------------------------------------------------- Painel do dia
 route('GET', '/api/dashboard', () => {

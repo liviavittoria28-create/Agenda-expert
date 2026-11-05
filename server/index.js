@@ -9,6 +9,7 @@ import { db, seed } from './db.js';
 import { getSessionUser, upsertUser, verifyPassword, COOKIE } from './auth.js';
 import { matchRoute, HttpError } from './api.js';
 import { startBackups } from './backup.js';
+import { autoStart as startWhatsApp } from './whatsapp.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.resolve(__dirname, '..', 'public');
@@ -24,6 +25,7 @@ const BUILD_ID = buildId(PUBLIC);
 seed();
 syncUser();
 startBackups();
+if (process.env.WHATSAPP !== "0") startWhatsApp();
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',

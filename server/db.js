@@ -112,6 +112,18 @@ CREATE TABLE IF NOT EXISTS transactions (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_tx_date ON transactions(date);
+CREATE TABLE IF NOT EXISTS wa_messages (
+  id INTEGER PRIMARY KEY,
+  appointment_id INTEGER NOT NULL UNIQUE REFERENCES appointments(id) ON DELETE CASCADE,
+  phone TEXT NOT NULL,
+  jid TEXT,
+  status TEXT NOT NULL,
+  error TEXT,
+  reply TEXT,
+  reply_text TEXT,
+  sent_at TEXT,
+  replied_at TEXT
+);
 CREATE TABLE IF NOT EXISTS stock_items (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
@@ -157,6 +169,27 @@ const DEFAULT_SETTINGS = {
   studio_address: 'Rua Aiapaina, 3A — Tatuapé',
   consent_text:
     'Declaro que as informações prestadas nesta ficha são verdadeiras e que fui informada sobre o procedimento, seus cuidados, riscos e contraindicações. Autorizo a realização do procedimento e me comprometo a seguir as orientações de pós-cuidado. Autorizo o armazenamento destes dados pessoais e de saúde exclusivamente para fins de atendimento, conforme a LGPD (Lei 13.709/2018).',
+  // Mensagem pronta do botão WhatsApp (editável em Mais → Ajustes).
+  // Campos trocados automaticamente: [nome] [data] [horário] [procedimento] [valor]
+  whatsapp_template: [
+    'Olá! Tudo bem? 🤍',
+    '',
+    'Passando para confirmar seu atendimento, agendado para o dia [data], às [horário].',
+    '',
+    '📍 *Studio – Rua Aiapaina, 3A - Tatuapé*',
+    '',
+    'Será um prazer receber você!',
+    'Por favor, confirme sua presença respondendo: “Confirmo meu horário”.',
+    '',
+    'Assim, posso me preparar para recebê-la com todo carinho! ✨',
+  ].join('\n'),
+  // Robô de confirmação (Mais → WhatsApp)
+  wa_auto: '0',
+  wa_mode: 'same_day', // same_day = no dia · day_before = na véspera
+  wa_time: '08:00',
+  wa_footer: 'Responda com o número:\n*1* – Confirmo meu horário ✅\n*2* – Preciso remarcar 🗓️',
+  wa_reply_confirm: 'Perfeito, [nome]! Seu horário de [data] às [horário] está confirmado ✨ Até lá! 🤍',
+  wa_reply_reschedule: 'Sem problemas, [nome]! Já avisei aqui e logo te chamo para encontrarmos um novo horário 🤍',
 };
 
 export function seed() {

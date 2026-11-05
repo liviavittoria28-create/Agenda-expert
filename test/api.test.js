@@ -123,6 +123,16 @@ test('RNF06: senha armazenada com hash (scrypt), nunca em texto', async () => {
 });
 
 // ------------------------------------------------------------------ Ajustes
+test('mensagem do WhatsApp: modelo padrão e edição em Ajustes', async () => {
+  const s = (await get('/api/settings')).data;
+  assert.match(s.whatsapp_template, /Passando para confirmar seu atendimento, agendado para o dia \[data\], às \[horário\]/);
+  assert.match(s.whatsapp_template, /Rua Aiapaina, 3A/);
+  const novo = 'Oi [nome], te espero dia [data] às [horário]! 💛';
+  assert.equal((await put('/api/settings', { whatsapp_template: novo })).data.whatsapp_template, novo);
+  assert.equal((await get('/api/me')).data.settings.whatsapp_template, novo);
+  await put('/api/settings', { whatsapp_template: s.whatsapp_template });
+});
+
 test('ajustes: salva horário e rejeita horário inválido', async () => {
   const r = await put('/api/settings', { open_time: '08:00', close_time: '20:00', work_days: '0,1,2,3,4,5,6', gap_min: '0' });
   assert.equal(r.status, 200);
@@ -487,6 +497,30 @@ test('RF26: ficha da cliente traz histórico e total pago', async () => {
   const c = await get(`/api/clients/${ids.bia}`);
   assert.ok(c.data.history.length >= 2);
   assert.equal(c.data.spent_cents, 20000);
+});
+
+// ------------------------------------------------------------------ WhatsApp
+test('WhatsApp: começa desconectado e não envia sem conexão', async () => {
+  const r = await get('/api/whatsapp');
+  assert.equal(r.status, 200);
+  assert.equal(r.data.status, 'disconnected');
+  assert.match(r.data.target_date, /^\d{4}-\d{2}-\d{2}$/);
+  assert.ok(Array.isArray(r.data.appointments));
+  assert.equal((await post('/api/whatsapp/send', {})).status, 409);
+  assert.equal((await get('/api/whatsapp', { auth: false })).status, 401, 'exige login');
+  assert.equal((await post('/api/whatsapp/connect', { phone: '123' })).status, 400, 'número inválido');
+});
+
+test('WhatsApp: ajustes do robô validados', async () => {
+  assert.equal((await put('/api/settings', { wa_time: '99:00' })).status, 400);
+  assert.equal((await put('/api/settings', { wa_mode: 'sempre' })).status, 400);
+  const r = await put('/api/settings', { wa_auto: true, wa_mode: 'day_before', wa_time: '18:00' });
+  assert.equal(r.data.wa_auto, '1');
+  assert.equal(r.data.wa_mode, 'day_before');
+  assert.match(r.data.wa_footer, /\*1\*/);
+  await put('/api/settings', { wa_auto: '0', wa_mode: 'same_day', wa_time: '08:00' });
+  const a = (await get(`/api/appointments?from=${D1}&to=${D1}`)).data.appointments[0];
+  assert.equal(a.wa, null, 'atendimento sem envio');
 });
 
 // ------------------------------------------------------------------ Estoque (RF28)

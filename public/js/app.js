@@ -8,6 +8,7 @@ import { renderClients, renderClient } from './views/clients.js';
 import { renderProcedures } from './views/procedures.js';
 import { renderFinance } from './views/finance.js';
 import { renderMore, renderBlocks, renderStock, renderSettings } from './views/more.js';
+import { renderWhatsApp } from './views/whatsapp.js';
 
 const root = document.getElementById('root');
 
@@ -76,6 +77,7 @@ async function route() {
     else if (tab === 'mais' && parts[1] === 'bloqueios') await renderBlocks(main, ctx);
     else if (tab === 'mais' && parts[1] === 'estoque') await renderStock(main, ctx);
     else if (tab === 'mais' && parts[1] === 'ajustes') await renderSettings(main, ctx);
+    else if (tab === 'mais' && parts[1] === 'whatsapp') await renderWhatsApp(main, ctx);
     else if (tab === 'mais') await renderMore(main, ctx);
     else location.hash = '#/agenda';
   } catch (e) {

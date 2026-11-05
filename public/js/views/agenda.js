@@ -164,7 +164,7 @@ const apptCard = (a) => `
     <div class="appt__main">
       <div class="appt__name">${esc(a.client_name)}</div>
       <div class="appt__proc">${esc(a.procedures.map((p) => p.name).join(' + '))}</div>
-      <div class="row gap-sm">${statusBadge(a.status)}${a.anamnese !== 'ok' ? '<span class="badge badge--warn">Anamnese pendente</span>' : ''}</div>
+      <div class="row gap-sm">${statusBadge(a.status)}${a.anamnese !== 'ok' ? '<span class="badge badge--warn">Anamnese pendente</span>' : ''}${a.wa?.reply === 'reschedule' ? '<span class="badge st-cancelada">Pediu remarcar</span>' : a.wa?.reply === 'confirm' ? '<span class="badge badge--ok">Confirmou no WhatsApp</span>' : ''}</div>
     </div>
     <div class="item__end small muted" style="font-weight:700">${money(a.total_cents)}</div>
   </button>`;

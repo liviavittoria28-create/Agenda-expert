@@ -3,10 +3,13 @@ import { api } from '../api.js';
 import { I } from '../icons.js';
 import {
   state, esc, money, fmtDate, fmtDayLong, fmtDuration, toMin, fromMin, statusBadge, STATUS, initials,
-  openSheet, confirmDialog, toast, toastError, markInvalid, busy, rerender, go, waLink, checkbox, nowMinBR,
+  openSheet, confirmDialog, toast, toastError, markInvalid, busy, rerender, go, waLink, waMessage, checkbox, nowMinBR,
 } from '../ui.js';
 import { openClientForm } from './clients.js';
 import { openTxForm } from './finance.js';
+
+// só faz sentido pedir confirmação de atendimentos que ainda vão acontecer
+const ACTIVE_ST = ['agendada', 'confirmada'];
 
 export async function loadProcedures(force = false) {
   if (!state.procedures || force) state.procedures = await api.get('/api/procedures');
@@ -185,6 +188,7 @@ export async function openAppointmentDetail(idOrAppt) {
         <dt>Data</dt><dd>${fmtDayLong(a.date)}</dd>
         <dt>Horário</dt><dd>${a.start} – ${a.end} <span class="muted small">· ${fmtDuration(a.duration_min)}</span></dd>
         <dt>Valor</dt><dd>${money(a.total_cents)}</dd>
+        ${a.wa ? `<dt>WhatsApp</dt><dd>${a.wa.reply === 'confirm' ? 'Cliente confirmou ✅' : a.wa.reply === 'reschedule' ? '<span style="color:var(--out)">Pediu para remarcar</span>' : a.wa.status === 'sent' ? 'Confirmação enviada, aguardando resposta' : `Falhou: ${esc(a.wa.error || '')}`}</dd>` : ''}
         ${a.notes ? `<dt>Obs.</dt><dd style="font-weight:500">${esc(a.notes)}</dd>` : ''}
         ${a.status === 'cancelada' && a.cancel_reason ? `<dt>Motivo</dt><dd style="font-weight:500">${esc(a.cancel_reason)}</dd>` : ''}
       </dl>
@@ -200,7 +204,7 @@ export async function openAppointmentDetail(idOrAppt) {
       <div class="quick">
         <button type="button" data-edit>${I.repeat}Reagendar</button>
         <a href="#/clientes/${a.client_id}" data-client>${I.user}Ficha</a>
-        <a href="${waLink(a.client_phone)}" target="_blank" rel="noopener">${I.whatsapp}WhatsApp</a>
+        <a href="${esc(waLink(a.client_phone, ACTIVE_ST.includes(a.status) ? waMessage(state.settings.whatsapp_template, a) : ''))}" target="_blank" rel="noopener">${I.whatsapp}${ACTIVE_ST.includes(a.status) ? 'Confirmar' : 'WhatsApp'}</a>
       </div>
       <button type="button" class="btn btn--danger btn--block btn--sm mt" data-del>${I.trash}Excluir agendamento</button>`,
     foot: `<button class="btn btn--gold" data-save>Salvar</button>`,

@@ -4,7 +4,7 @@ const SHELL = [
   '/', '/index.html', '/css/app.css', '/manifest.webmanifest', '/icons/icon.svg', '/icons/apple-touch-icon.png',
   '/js/app.js', '/js/api.js', '/js/ui.js', '/js/icons.js',
   '/js/views/login.js', '/js/views/agenda.js', '/js/views/appointment.js', '/js/views/clients.js',
-  '/js/views/procedures.js', '/js/views/finance.js', '/js/views/more.js',
+  '/js/views/procedures.js', '/js/views/finance.js', '/js/views/more.js', '/js/views/whatsapp.js',
 ];
 const API_CACHE = 'ae-api';
 const OFFLINE_API = ['/api/me', '/api/appointments', '/api/procedures', '/api/clients', '/api/dashboard'];

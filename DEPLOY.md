@@ -78,6 +78,16 @@ O app não tem tela para trocar a senha, de propósito: o acesso fica só nas va
 1. Abra o endereço no **Safari** e faça o login.
 2. Toque em **Compartilhar** e depois em **Adicionar à Tela de Início**.
 
+## 5. Conectar o WhatsApp (robô de confirmação)
+
+1. No app publicado, abra **Mais → WhatsApp**.
+2. Conecte de um dos dois jeitos:
+   - **Pelo computador:** escaneie o QR code com o celular do estúdio, em WhatsApp → Aparelhos conectados → **Conectar aparelho**.
+   - **Pelo próprio iPhone:** use **Conectar com número** e digite o código em WhatsApp → Aparelhos conectados → **Conectar com número de telefone**.
+3. Ligue o **envio automático** e escolha o horário.
+
+A conexão fica guardada no disco do Render, então continua ativa depois de atualizações e reinícios. No plano Free ela se perderia, assim como os dados.
+
 ## Atualizações
 
 Toda alteração enviada ao GitHub, pelo **Push** do GitHub Desktop ou por `git push`, é publicada sozinha pelo Render. Os iPhones recebem a versão nova ao abrir o app.

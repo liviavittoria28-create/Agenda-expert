@@ -81,3 +81,19 @@ test('rotas do app (hash)', () => {
   assert.deepEqual(ui.parseHash().parts, ['agenda']);
   assert.equal(ui.qs({ m: '2026-11', tipo: '', cat: null }), '?m=2026-11');
 });
+
+test('WhatsApp: mensagem pronta com data, horário e nome', () => {
+  const a = { client_name: 'Ana Paula Souza', date: '2026-11-05', start: '11:00', end: '13:00', total_cents: 17000, procedures: [{ name: 'Extensão de cílios' }] };
+  const msg = ui.waMessage('Oi [nome]! Dia [data], às [horário] ([HORARIO]) — [procedimento], [valor]. [outro]', a);
+  assert.equal(nb(msg), 'Oi Ana! Dia 05/11/2026 (quinta-feira), às 11:00 (11:00) — Extensão de cílios, R$ 170,00. [outro]');
+  assert.match(ui.waMessage('[data]', { ...a, date: '2026-11-07' }), /\(sábado\)/);
+  assert.match(ui.waMessage('[data]', { ...a, date: '2026-11-08' }), /\(domingo\)/);
+  assert.equal(ui.waMessage('', a), '');
+});
+
+test('WhatsApp: link gratuito wa.me com o texto codificado (emojis e quebras de linha)', () => {
+  const url = ui.waLink('(11) 99999-0000', 'Olá! 🤍\n*Studio*');
+  assert.ok(url.startsWith('https://wa.me/5511999990000?text='));
+  assert.equal(decodeURIComponent(url.split('?text=')[1]), 'Olá! 🤍\n*Studio*');
+  assert.equal(ui.waLink('(11) 99999-0000'), 'https://wa.me/5511999990000');
+});

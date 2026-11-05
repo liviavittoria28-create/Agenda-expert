@@ -18,13 +18,30 @@ O acesso vem **sempre** das variáveis `ADMIN_EMAIL` e `ADMIN_PASSWORD` (no `.en
 
 O app começa vazio, só com os 9 procedimentos do catálogo.
 
+## Robô de confirmação pelo WhatsApp
+
+Fica em **Mais → WhatsApp** e é gratuito: conecta o WhatsApp do estúdio como se fosse um WhatsApp Web.
+
+1. **Conectar.** Se o app estiver aberto no computador, escaneie o QR code com o celular. No próprio iPhone, use **Conectar com número** e digite o código de 8 letras em WhatsApp → Aparelhos conectados → **Conectar com número de telefone**.
+2. **Envio automático.** Ligue a opção e escolha quando enviar (**no dia** ou **na véspera**) e a partir de que horário. O robô manda a mensagem de confirmação para cada atendimento "Agendada", uma vez só, com pausas de 8 a 18 segundos entre uma mensagem e outra.
+3. **Respostas.**
+   - Se a cliente responder **1**, "confirmo", "sim"…, o atendimento vira **Confirmada** e o robô agradece.
+   - Se responder **2**, "remarcar", "não posso"…, o atendimento ganha o aviso **Pediu para remarcar** e o robô avisa que você vai chamar.
+   - Qualquer outra mensagem fica para você responder; o robô não se mete na conversa.
+4. **Todas as mensagens** (confirmação, instruções e respostas) podem ser editadas nessa tela, com prévia.
+
+**Limites:**
+- **Sem botões.** O WhatsApp só permite botões clicáveis na API oficial e paga da Meta; por isso a cliente responde com números.
+- **Uso não oficial.** A conexão usa a biblioteca [Baileys](https://github.com/WhiskeySockets/Baileys). O WhatsApp pode restringir números que mandam muitas mensagens, então use com moderação.
+- **Sessão no servidor.** A conexão fica salva em `DATA_DIR/whatsapp-auth` e volta sozinha quando o servidor reinicia. Para desligar o robô no servidor, defina `WHATSAPP=0`.
+
 ## Testes automáticos
 
 ```bash
 npm test
 ```
 
-São 63 testes, que rodam num banco temporário sem mexer nos seus dados. Eles cobrem:
+São 80 testes, que rodam num banco temporário sem mexer nos seus dados. Eles cobrem:
 
 - login e sessão, incluindo o limite de tentativas;
 - clientes e anamnese;
@@ -32,6 +49,7 @@ São 63 testes, que rodam num banco temporário sem mexer nos seus dados. Eles c
 - agendamentos: conflitos, bloqueios, status, avisos (RN12, RN13) e preço congelado (RN08);
 - financeiro e exportação em CSV;
 - estoque e backup;
+- robô do WhatsApp, com um WhatsApp simulado: envio, respostas, "9" extra do celular e envio automático;
 - segurança: CSRF, acesso a arquivos fora da pasta pública e XSS;
 - PWA;
 - desempenho com 5.000 clientes e cerca de 25 mil atendimentos.

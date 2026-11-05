@@ -1,11 +1,12 @@
 // Mais: bloqueios, estoque, ajustes, conta, instalação e backup
 import { api } from '../api.js';
 import { I } from '../icons.js';
-import { state, esc, fmtDate, openSheet, confirmDialog, toast, toastError, markInvalid, busy, rerender, go, empty, DOW_SHORT } from '../ui.js';
+import { state, esc, waMessage, fmtDate, openSheet, confirmDialog, toast, toastError, markInvalid, busy, rerender, go, empty, DOW_SHORT } from '../ui.js';
 import { openBlockForm } from './appointment.js';
+import { waLabel } from './whatsapp.js';
 
 export async function renderMore(main) {
-  const dash = await api.get('/api/dashboard').catch(() => ({}));
+  const [dash, wa] = await Promise.all([api.get('/api/dashboard').catch(() => ({})), api.get('/api/whatsapp').catch(() => null)]);
   const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
   const mi = (icon, title, sub, attrs) => `<button ${attrs}><span class="mi">${icon}</span><span class="grow">${title}${sub ? `<small>${sub}</small>` : ''}</span><span class="item__chev">${I.right}</span></button>`;
   main.innerHTML = `
@@ -14,6 +15,7 @@ export async function renderMore(main) {
       <div class="card menu">
         ${mi(I.lock, 'Bloqueios de agenda', 'Folgas, viagens e horários indisponíveis', 'data-go="#/mais/bloqueios"')}
         ${mi(I.box, 'Estoque de materiais', dash.low_stock ? `${dash.low_stock} item(ns) abaixo do mínimo` : 'Entradas, saídas e quantidade mínima', 'data-go="#/mais/estoque"')}
+        ${mi(I.whatsapp, 'WhatsApp', waLabel(wa), 'data-go="#/mais/whatsapp"')}
         ${mi(I.settings, 'Ajustes', 'Horário de atendimento, termo e acesso', 'data-go="#/mais/ajustes"')}
       </div>
       <div class="section-title">Aplicativo</div>

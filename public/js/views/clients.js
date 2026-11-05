@@ -2,7 +2,7 @@
 import { api } from '../api.js';
 import { I } from '../icons.js';
 import {
-  state, esc, money, fmtDate, fmtDayShort, initials, maskPhone, waLink, statusBadge, openSheet, confirmDialog,
+  state, esc, money, fmtDate, fmtDayShort, initials, maskPhone, waLink, waMessage, statusBadge, openSheet, confirmDialog,
   toast, toastError, markInvalid, busy, rerender, go, formData, empty, parseD, MONTHS_SHORT,
 } from '../ui.js';
 import { openAppointmentForm, openAppointmentDetail } from './appointment.js';
@@ -80,7 +80,7 @@ export async function renderClient(main, ctx) {
       <div class="quick">
         <button data-book>${I.calendar}Agendar</button>
         <button data-anam>${I.clipboard}Anamnese</button>
-        <a href="${waLink(c.phone)}" target="_blank" rel="noopener">${I.whatsapp}WhatsApp</a>
+        <a href="${esc(waLink(c.phone, upcoming[0] ? waMessage(state.settings.whatsapp_template, upcoming[0]) : ''))}" target="_blank" rel="noopener">${I.whatsapp}${upcoming[0] ? 'Confirmar' : 'WhatsApp'}</a>
       </div>
       <div class="card stats mt">
         <div><b>${done.length}</b><span>Concluídos</span></div>

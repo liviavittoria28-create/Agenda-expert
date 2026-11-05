@@ -656,3 +656,30 @@ button.item:hover, a.item:hover { box-shadow: var(--shadow-1); }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* ------------------------------------------------------------ WhatsApp */
+.wa-hero { text-align: center; padding: 8px 4px; }
+.wa-hero__ico { width: 56px; height: 56px; border-radius: 18px; display: grid; place-items: center; margin: 0 auto 14px; background: #e6f2e8; color: #2f7a46; }
+.wa-hero__ico svg { width: 28px; height: 28px; }
+.wa-hero > b { display: block; font-family: var(--serif); font-size: 26px; font-weight: 500; line-height: 1.15; }
+.wa-hero > p { color: var(--ink-2); font-size: 14px; margin: 8px auto 18px; max-width: 420px; }
+.wa-conn { display: flex; align-items: center; gap: 14px; }
+.wa-conn b { display: block; font-size: 15px; }
+.wa-conn span { font-size: 13px; color: var(--ink-2); }
+.wa-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--line-2); flex: none; }
+.wa-dot.is-on { background: #3aa55c; box-shadow: 0 0 0 5px rgba(58, 165, 92, .15); }
+.wa-qr-wrap { display: flex; gap: 22px; align-items: center; flex-wrap: wrap; }
+.wa-qr { width: 230px; max-width: 100%; padding: 12px; background: #fff; border-radius: 18px; border: 1px solid var(--line); flex: none; }
+.wa-qr svg { width: 100%; height: auto; }
+.wa-steps { margin: 0; padding-left: 20px; line-height: 1.7; font-size: 14px; color: var(--ink-2); flex: 1 1 220px; min-width: 0; }
+.wa-qr-wrap .wa-qr { margin: 0 auto; }
+.card { min-width: 0; }
+.wa-steps b { color: var(--ink); }
+.wa-pair { text-align: center; }
+.wa-code { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 34px; font-weight: 700; letter-spacing: .14em; color: var(--brown); padding: 14px; margin: 4px 0 16px; background: var(--gold-faint); border: 1px dashed var(--gold); border-radius: 16px; }
+.wa-pair .wa-steps { text-align: left; margin-bottom: 14px; }
+.wa-bubble {
+  position: relative; max-width: 420px; padding: 12px 14px 14px; border-radius: 4px 16px 16px 16px;
+  background: #e7f8dc; color: #1f2a1c; font-size: 14px; line-height: 1.5; white-space: pre-wrap; box-shadow: 0 1px 1px rgba(0, 0, 0, .08);
+}
+.item > button.item__main { background: none; border: 0; padding: 0; cursor: pointer; }

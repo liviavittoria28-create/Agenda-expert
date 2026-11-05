@@ -48,7 +48,30 @@ export const nowMinBR = () => {
 };
 export const todayBR = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
 export const initials = (name) => (name || '?').trim().split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]).join('').toUpperCase();
-export const waLink = (phone) => { let d = String(phone || '').replace(/\D/g, ''); if (d.length <= 11) d = '55' + d; return `https://wa.me/${d}`; };
+// Link do WhatsApp (gratuito): abre a conversa com a mensagem já escrita; basta tocar em enviar
+export const waLink = (phone, text = '') => {
+  let d = String(phone || '').replace(/\D/g, '');
+  if (d.length <= 11) d = '55' + d;
+  return `https://wa.me/${d}${text ? `?text=${encodeURIComponent(text)}` : ''}`;
+};
+// Preenche a mensagem modelo com os dados do atendimento
+export function waMessage(template, a) {
+  if (!template) return '';
+  const first = (a?.client_name || '').trim().split(/\s+/)[0] || '';
+  const d = a?.date ? parseD(a.date) : null;
+  const values = {
+    nome: first,
+    'nome completo': a?.client_name || '',
+    data: d ? `${fmtDate(a.date)} (${DOW[d.getUTCDay()]}${d.getUTCDay() > 0 && d.getUTCDay() < 6 ? '-feira' : ''})` : '',
+    horario: a?.start || '',
+    hora: a?.start || '',
+    termino: a?.end || '',
+    procedimento: (a?.procedures || []).map((p) => p.name).join(' + '),
+    valor: a ? money(a.total_cents) : '',
+  };
+  const key = (k) => k.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  return template.replace(/\[([^\]]+)\]/g, (m, k) => (key(k) in values ? values[key(k)] : m));
+}
 export const maskPhone = (v) => {
   const d = v.replace(/\D/g, '').slice(0, 11);
   if (d.length <= 2) return d ? `(${d}` : '';
